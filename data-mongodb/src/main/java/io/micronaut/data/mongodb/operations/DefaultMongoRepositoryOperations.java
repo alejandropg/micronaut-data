@@ -57,7 +57,6 @@ import io.micronaut.data.model.runtime.RuntimePersistentEntity;
 import io.micronaut.data.model.runtime.RuntimePersistentProperty;
 import io.micronaut.data.model.runtime.UpdateBatchOperation;
 import io.micronaut.data.model.runtime.UpdateOperation;
-import io.micronaut.data.mongodb.annotation.MongoProjection;
 import io.micronaut.data.mongodb.conf.RequiresSyncMongo;
 import io.micronaut.data.mongodb.database.MongoDatabaseFactory;
 import io.micronaut.data.mongodb.transaction.MongoSynchronousTransactionManager;
@@ -324,12 +323,9 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
         }
         MongoDatabase database = preparedQuery.getDatabase();
         RuntimePersistentEntity<T> persistentEntity = preparedQuery.getRuntimePersistentEntity();
+        Class<T> type = preparedQuery.getRootEntity();
         Class<R> resultType = preparedQuery.getResultType();
-        boolean isProjection = pipeline.stream().anyMatch(stage -> {
-            BsonDocument s = stage.toBsonDocument();
-            return s.containsKey("$group") || s.containsKey("$project");
-        });
-        if (isProjection) {
+        if (!resultType.isAssignableFrom(type)) {
             BsonDocument result = getCollection(database, persistentEntity, BsonDocument.class)
                     .aggregate(clientSession, pipeline, BsonDocument.class)
                     .collation(preparedQuery.getCollation())
@@ -339,7 +335,6 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
         return getCollection(database, persistentEntity, resultType).aggregate(clientSession, pipeline)
                 .collation(preparedQuery.getCollation())
                 .map(r -> {
-            Class<T> type = preparedQuery.getRootEntity();
             if (type.isInstance(r)) {
                 return (R) triggerPostLoad(preparedQuery.getAnnotationMetadata(), persistentEntity, type.cast(r));
             }
@@ -357,14 +352,11 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
         if (QUERY_LOG.isDebugEnabled()) {
             QUERY_LOG.debug("Executing Mongo 'aggregate' with pipeline: {}", pipeline.stream().map(e -> e.toBsonDocument().toJson()).collect(Collectors.toList()));
         }
-        boolean isProjection = pipeline.stream().anyMatch(stage -> {
-            BsonDocument s = stage.toBsonDocument();
-            return s.containsKey("$group") || s.containsKey("$project");
-        });
         Collation collation = preparedQuery.getCollation();
+        Class<T> type = preparedQuery.getRootEntity();
         Class<R> resultType = preparedQuery.getResultType();
         MongoIterable<R> aggregate;
-        if (isProjection && !preparedQuery.getAnnotationMetadata().hasAnnotation(MongoProjection.class)) {
+        if (!resultType.isAssignableFrom(type)) {
             MongoDatabase database = preparedQuery.getDatabase();
             aggregate = getCollection(database, preparedQuery.getRuntimePersistentEntity(), BsonDocument.class)
                     .aggregate(clientSession, pipeline, BsonDocument.class)

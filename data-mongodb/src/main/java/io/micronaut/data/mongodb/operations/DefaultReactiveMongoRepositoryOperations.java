@@ -324,9 +324,6 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
     }
 
     private <T, R> Flux<R> findAll(ClientSession clientSession, MongoPreparedQuery<T, R, MongoDatabase> preparedQuery, boolean stream) {
-        Class<T> type = preparedQuery.getRootEntity();
-        RuntimePersistentEntity<T> persistentEntity = runtimeEntityRegistry.getEntity(type);
-
         if (isCountQuery(preparedQuery)) {
             return getCount(clientSession, preparedQuery).flux();
         }
@@ -334,7 +331,7 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
         if (pipeline == null) {
             return findAll(clientSession, preparedQuery, preparedQuery.getFilterOrEmpty(), stream);
         }
-        return findAllAggregated(clientSession, preparedQuery, preparedQuery.isDtoProjection(), pipeline, stream);
+        return findAllAggregated(clientSession, preparedQuery, preparedQuery.isDtoProjection(), pipeline);
     }
 
     private <T, R> Mono<R> getCount(ClientSession clientSession, MongoPreparedQuery<T, R, MongoDatabase> preparedQuery) {
@@ -393,11 +390,7 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
         if (QUERY_LOG.isDebugEnabled()) {
             QUERY_LOG.debug("Executing Mongo 'aggregate' with pipeline: {}", pipeline.stream().map(e -> e.toBsonDocument().toJson()).collect(Collectors.toList()));
         }
-        boolean isProjection = pipeline.stream().anyMatch(stage -> {
-            BsonDocument s = stage.toBsonDocument();
-            return s.containsKey("$group") || s.containsKey("$project");
-        });
-        if (isProjection) {
+        if (!resultType.isAssignableFrom(type)) {
             return Mono.from(getCollection(database, persistentEntity, BsonDocument.class)
                             .aggregate(clientSession, pipeline, BsonDocument.class)
                             .collation(preparedQuery.getCollation())
@@ -416,23 +409,20 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
                 });
     }
 
-    private <T, R> Flux<R> findAllAggregated(ClientSession clientSession, MongoPreparedQuery<T, R, MongoDatabase> preparedQuery, boolean isDtoProjection, List<Bson> pipeline, boolean stream) {
+    private <T, R> Flux<R> findAllAggregated(ClientSession clientSession, MongoPreparedQuery<T, R, MongoDatabase> preparedQuery, boolean isDtoProjection, List<Bson> pipeline) {
+        Class<T> type = preparedQuery.getRootEntity();
         Class<R> resultType = preparedQuery.getResultType();
         MongoDatabase database = preparedQuery.getDatabase();
         RuntimePersistentEntity<T> persistentEntity = preparedQuery.getRuntimePersistentEntity();
         if (QUERY_LOG.isDebugEnabled()) {
             QUERY_LOG.debug("Executing Mongo 'aggregate' with pipeline: {}", pipeline.stream().map(e -> e.toBsonDocument().toJson()).collect(Collectors.toList()));
         }
-        boolean isProjection = pipeline.stream().anyMatch(stage -> {
-            BsonDocument s = stage.toBsonDocument();
-            return s.containsKey("$group") || s.containsKey("$project");
-        });
         Flux<R> aggregate;
-        if (isProjection) {
+        if (!resultType.isAssignableFrom(type)) {
             aggregate = Flux.from(getCollection(database, persistentEntity, BsonDocument.class)
-                            .aggregate(clientSession, pipeline, BsonDocument.class)
-                            .collation(preparedQuery.getCollation())
-                    ).map(result -> convertResult(database.getCodecRegistry(), resultType, result, isDtoProjection));
+                    .aggregate(clientSession, pipeline, BsonDocument.class)
+                    .collation(preparedQuery.getCollation())
+            ).map(result -> convertResult(database.getCodecRegistry(), resultType, result, isDtoProjection));
         } else {
             aggregate = Flux.from(getCollection(database, persistentEntity, resultType)
                     .aggregate(clientSession, pipeline, resultType)
