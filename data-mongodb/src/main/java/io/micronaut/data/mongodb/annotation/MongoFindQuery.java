@@ -62,7 +62,7 @@ public @interface MongoFindQuery {
      * @return The fields
      */
     @AliasFor(member = "value", annotation = MongoProjection.class)
-    String fields() default "";
+    String project() default "";
 
     /**
      * The custom collation represented in JSON.

@@ -57,6 +57,7 @@ import io.micronaut.data.model.runtime.RuntimePersistentEntity;
 import io.micronaut.data.model.runtime.RuntimePersistentProperty;
 import io.micronaut.data.model.runtime.UpdateBatchOperation;
 import io.micronaut.data.model.runtime.UpdateOperation;
+import io.micronaut.data.mongodb.annotation.MongoProjection;
 import io.micronaut.data.mongodb.conf.RequiresSyncMongo;
 import io.micronaut.data.mongodb.database.MongoDatabaseFactory;
 import io.micronaut.data.mongodb.transaction.MongoSynchronousTransactionManager;
@@ -363,7 +364,7 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
         Collation collation = preparedQuery.getCollation();
         Class<R> resultType = preparedQuery.getResultType();
         MongoIterable<R> aggregate;
-        if (isProjection) {
+        if (isProjection && !preparedQuery.getAnnotationMetadata().hasAnnotation(MongoProjection.class)) {
             MongoDatabase database = preparedQuery.getDatabase();
             aggregate = getCollection(database, preparedQuery.getRuntimePersistentEntity(), BsonDocument.class)
                     .aggregate(clientSession, pipeline, BsonDocument.class)

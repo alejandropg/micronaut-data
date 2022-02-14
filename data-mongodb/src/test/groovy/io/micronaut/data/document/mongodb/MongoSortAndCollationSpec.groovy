@@ -195,5 +195,5 @@ class MyNumber {
     @GeneratedValue
     String id
 
-    String n;
+    String n
 }

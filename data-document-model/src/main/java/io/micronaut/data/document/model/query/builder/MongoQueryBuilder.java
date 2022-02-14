@@ -286,6 +286,11 @@ public final class MongoQueryBuilder implements QueryBuilder {
         }
         if (!projectionObj.isEmpty()) {
             pipeline.add(singletonMap("$project", projectionObj));
+        } else {
+            String customProjection = annotationMetadata.stringValue(MongoAnnotations.PROJECTION).orElse(null);
+            if (customProjection != null) {
+                pipeline.add(singletonMap("$project", new RawJsonValue(customProjection)));
+            }
         }
         Sort sort = query.getSort();
         if (sort.isSorted() && !sort.getOrderBy().isEmpty()) {

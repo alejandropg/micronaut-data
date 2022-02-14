@@ -23,5 +23,6 @@ public interface MongoAnnotations {
     String REPOSITORY = "io.micronaut.data.mongodb.annotation.MongoFindQuery";
     String FIND_QUERY = "io.micronaut.data.mongodb.annotation.MongoFindQuery";
     String SORT = "io.micronaut.data.mongodb.annotation.MongoSort";
+    String PROJECTION = "io.micronaut.data.mongodb.annotation.MongoProjection";
 
 }

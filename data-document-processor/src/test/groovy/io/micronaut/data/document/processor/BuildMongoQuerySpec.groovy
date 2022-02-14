@@ -1,6 +1,6 @@
 package io.micronaut.data.document.processor
 
-class BuildQuerySpec extends AbstractDataSpec {
+class BuildMongoQuerySpec extends AbstractDataSpec {
 
     void "test custom method"() {
         given:
