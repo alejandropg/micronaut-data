@@ -73,9 +73,6 @@ public class MongoRawQueryMethodMatcher implements MethodMatcher {
         if (!matchContext.getAnnotationMetadata().hasAnnotation(MongoAnnotations.REPOSITORY)) {
             return null;
         }
-        if (matchContext.getMethodElement().stringValue(Query.class).isPresent()) {
-            throw new MatchFailedException("`@Query` annotations is not supported for MongoDB repositories. Use one of the annotations from `io.micronaut.data.mongodb.annotation` for a custom query.");
-        }
         if (matchContext.getMethodElement().hasAnnotation(MongoAnnotations.FIND_QUERY)) {
             return new MethodMatch() {
 
@@ -115,6 +112,9 @@ public class MongoRawQueryMethodMatcher implements MethodMatcher {
                     return methodMatchInfo;
                 }
             };
+        }
+        if (matchContext.getMethodElement().stringValue(Query.class).isPresent()) {
+            throw new MatchFailedException("`@Query` annotations is not supported for MongoDB repositories. Use one of the annotations from `io.micronaut.data.mongodb.annotation` for a custom query.");
         }
         return null;
     }
