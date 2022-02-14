@@ -15,11 +15,15 @@
  */
 package io.micronaut.data.mongodb.operations;
 
+import com.mongodb.client.model.Collation;
 import io.micronaut.core.annotation.Experimental;
+import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.data.model.runtime.StoredQuery;
-import org.bson.BsonArray;
 import org.bson.BsonDocument;
+import org.bson.conversions.Bson;
+
+import java.util.List;
 
 /**
  * MongoDB's {@link StoredQuery}.
@@ -33,21 +37,92 @@ import org.bson.BsonDocument;
 public interface MongoStoredQuery<E, R> extends StoredQuery<E, R> {
 
     /**
+     * The filter.
+     * NOTE: The value shouldn't be modified.
+     *
      * @return The filter
      */
     @Nullable
-    BsonDocument getFilter();
+    Bson getFilter();
 
     /**
-     * @return The aggregation pipeline
+     * @return true if filter value needs to replace query parameter values.
+     */
+    boolean isFilterNeedsProcessing();
+
+    /**
+     * The filter or empty.
+     * NOTE: The value shouldn't be modified.
+     *
+     * @return The filter
+     */
+    @NonNull
+    default Bson getFilterOrEmpty() {
+        Bson filter = getFilter();
+        return filter == null ? new BsonDocument() : filter;
+    }
+
+    /**
+     * The aggregation pipeline.
+     * NOTE: The value shouldn't be modified.
+     *
+     * @return The pipeline
      */
     @Nullable
-    BsonArray getPipeline();
+    List<Bson> getPipeline();
+
+    /**
+     * @return true if pipeline value needs to replace query parameter values.
+     */
+    boolean isPipelineNeedsProcessing();
+
+    /**
+     * The update.
+     * NOTE: The value shouldn't be modified.
+     *
+     * @return The update
+     */
+    @Nullable
+    Bson getUpdate();
 
     /**
      * @return The update
      */
+    @NonNull
+    default Bson getRequiredUpdate() {
+        Bson update = getUpdate();
+        if (update == null) {
+            throw new IllegalArgumentException("Update query is not provided!");
+        }
+        return update;
+    }
+
+    /**
+     * @return true if update value needs to replace query parameter values.
+     */
+    boolean isUpdateNeedsProcessing();
+
+    /**
+     * The Bson.
+     * NOTE: The value shouldn't be modified.
+     *
+     * @return The Bson
+     */
     @Nullable
-    BsonDocument getUpdate();
+    default Bson getCollationAsBson() {
+        return null;
+    }
+
+    /**
+     * @return true if collation value needs to replace query parameter values.
+     */
+    default boolean isCollationNeedsProcessing() {
+        return false;
+    }
+
+    @Nullable
+    default Collation getCollation() {
+        return null;
+    }
 
 }

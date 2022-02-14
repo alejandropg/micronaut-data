@@ -67,7 +67,9 @@ import java.util.stream.Collectors;
  */
 @Experimental
 public class QueryCriteriaMethodMatch extends AbstractCriteriaMethodMatch {
-    private static final Pattern ORDER_BY_PATTERN = Pattern.compile("(.*)OrderBy([\\w\\d]+)");
+    private static final String[] ORDER_VARIATIONS = {"Order", "Sort"};
+    private static final String BY = "By";
+    private static final Pattern ORDER_BY_PATTERN = Pattern.compile("(.*)(" + Arrays.stream(ORDER_VARIATIONS).map(o -> o + BY).collect(Collectors.joining("|")) + ")([\\w\\d]+)");
 
     /**
      * Default constructor.
@@ -94,12 +96,14 @@ public class QueryCriteriaMethodMatch extends AbstractCriteriaMethodMatch {
         if (matcher.groupCount() == 4) {
             String projectionSequence = matcher.group(3);
             String querySequence = matcher.group(4);
-            if (projectionSequence.endsWith("Order") && matchContext.getMethodElement().getName().contains("OrderBy" + querySequence)) {
-                apply(matchContext, root, query, cb, projectionSequence + "By" + querySequence);
-                return;
+            for (String orderVariation : ORDER_VARIATIONS) {
+                if (projectionSequence.endsWith(orderVariation) && matchContext.getMethodElement().getName().contains(orderVariation + BY + querySequence)) {
+                    apply(matchContext, root, query, cb, projectionSequence + BY + querySequence);
+                    return;
+                }
             }
             apply(matchContext, root, query, cb, projectionSequence, querySequence);
-        } else if (matcher.group(2).endsWith("By")) {
+        } else if (matcher.group(2).endsWith(BY)) {
             apply(matchContext, root, query, cb, "", matcher.group(3));
         } else {
             String querySequence = matcher.group(3);
@@ -322,7 +326,7 @@ public class QueryCriteriaMethodMatch extends AbstractCriteriaMethodMatch {
             StringBuffer buffer = new StringBuffer();
             if (matcher.find()) {
                 matcher.appendReplacement(buffer, "$1");
-                String orderDefGroup = matcher.group(2);
+                String orderDefGroup = matcher.group(3);
                 if (StringUtils.isNotEmpty(orderDefGroup)) {
                     String[] orderDefItems = orderDefGroup.split("And");
                     for (String orderDef : orderDefItems) {

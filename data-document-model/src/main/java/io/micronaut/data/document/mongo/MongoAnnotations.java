@@ -13,26 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.micronaut.data.mongodb.operations;
+package io.micronaut.data.document.mongo;
 
-import io.micronaut.core.annotation.Experimental;
-import io.micronaut.data.model.runtime.PreparedQuery;
-import io.micronaut.data.model.runtime.RuntimePersistentEntity;
+import io.micronaut.core.annotation.Internal;
 
-/**
- * MongoDB's {@link PreparedQuery}.
- *
- * @param <E>   The entity type
- * @param <R>   The result type
- * @param <Dtb> The database type
- * @author Denis Stepanov
- * @since 3.3.
- */
-@Experimental
-public interface MongoPreparedQuery<E, R, Dtb> extends PreparedQuery<E, R>, MongoStoredQuery<E, R> {
+@Internal
+public interface MongoAnnotations {
 
-    RuntimePersistentEntity<E> getRuntimePersistentEntity();
-
-    Dtb getDatabase();
+    String REPOSITORY = "io.micronaut.data.mongodb.annotation.MongoFindQuery";
+    String FIND_QUERY = "io.micronaut.data.mongodb.annotation.MongoFindQuery";
+    String SORT = "io.micronaut.data.mongodb.annotation.MongoSort";
 
 }

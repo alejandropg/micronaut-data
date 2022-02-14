@@ -35,7 +35,6 @@ import io.micronaut.data.exceptions.DataAccessException;
 import io.micronaut.data.model.DataType;
 import io.micronaut.data.model.Page;
 import io.micronaut.data.model.Pageable;
-import io.micronaut.data.model.PersistentEntity;
 import io.micronaut.data.model.PersistentProperty;
 import io.micronaut.data.model.Sort;
 import io.micronaut.data.model.query.builder.sql.Dialect;
@@ -73,6 +72,7 @@ import io.micronaut.transaction.reactive.ReactiveTransactionStatus;
 import org.bson.BsonDocument;
 import org.bson.BsonDocumentWrapper;
 import org.bson.BsonValue;
+import org.bson.codecs.configuration.CodecRegistry;
 import org.bson.conversions.Bson;
 import org.reactivestreams.Publisher;
 import org.slf4j.Logger;
@@ -100,7 +100,7 @@ import java.util.stream.Collectors;
 @RequiresReactiveMongo
 @EachBean(MongoClient.class)
 @Internal
-public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepositoryOperations<ClientSession, Object>
+public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepositoryOperations<MongoDatabase, ClientSession, Object>
         implements MongoReactorRepositoryOperations,
         ReactorReactiveRepositoryOperations,
         ReactiveCascadeOperations.ReactiveCascadeOperationsHelper<DefaultReactiveMongoRepositoryOperations.MongoOperationContext>,
@@ -150,26 +150,15 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
     @Override
     public <T, R> Mono<R> findOne(PreparedQuery<T, R> preparedQuery) {
         return withClientSession(clientSession -> {
-            Class<T> type = preparedQuery.getRootEntity();
-            Class<R> resultType = preparedQuery.getResultType();
-            RuntimePersistentEntity<T> persistentEntity = runtimeEntityRegistry.getEntity(type);
-            MongoDatabase database = getDatabase(persistentEntity, preparedQuery.getRepositoryType());
-            FetchOptions fetchOptions = getFetchOptions(database.getCodecRegistry(), preparedQuery, persistentEntity);
+            MongoPreparedQuery<T, R, MongoDatabase> mongoPreparedQuery = getMongoPreparedQuery(preparedQuery);
             if (isCountQuery(preparedQuery)) {
-                return getCount(clientSession, database, type, resultType, persistentEntity, fetchOptions);
+                return getCount(clientSession, mongoPreparedQuery);
             }
-            if (fetchOptions.pipeline == null) {
-                if (QUERY_LOG.isDebugEnabled()) {
-                    QUERY_LOG.debug("Executing Mongo 'find' with filter: {}", fetchOptions.filter.toBsonDocument().toJson());
-                }
-                return Mono.from(getCollection(database, persistentEntity, resultType).find(clientSession, fetchOptions.filter, resultType).limit(1).first()).map(r -> {
-                    if (type.isInstance(r)) {
-                        return (R) triggerPostLoad(preparedQuery.getAnnotationMetadata(), persistentEntity, type.cast(r));
-                    }
-                    return r;
-                });
+            List<Bson> pipeline = mongoPreparedQuery.getPipeline();
+            if (pipeline == null) {
+                return findOneFiltered(clientSession, mongoPreparedQuery);
             } else {
-                return findOneAggregated(clientSession, preparedQuery, type, resultType, persistentEntity, database, fetchOptions.pipeline);
+                return findOneAggregated(clientSession, mongoPreparedQuery, pipeline);
             }
         });
     }
@@ -177,20 +166,30 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
     @Override
     public <T> Mono<Boolean> exists(PreparedQuery<T, Boolean> preparedQuery) {
         return withClientSession(clientSession -> {
+            MongoPreparedQuery<T, Boolean, MongoDatabase> mongoPreparedQuery = getMongoPreparedQuery(preparedQuery);
             Class<T> type = preparedQuery.getRootEntity();
-            RuntimePersistentEntity<T> persistentEntity = runtimeEntityRegistry.getEntity(type);
-            MongoDatabase database = getDatabase(persistentEntity, preparedQuery.getRepositoryType());
-            FetchOptions fetchOptions = getFetchOptions(database.getCodecRegistry(), preparedQuery, persistentEntity);
-            if (fetchOptions.filter == null) {
+            RuntimePersistentEntity<T> persistentEntity = mongoPreparedQuery.getRuntimePersistentEntity();
+            MongoDatabase database = mongoPreparedQuery.getDatabase();
+            List<Bson> pipeline = mongoPreparedQuery.getPipeline();
+            if (pipeline != null) {
                 if (QUERY_LOG.isDebugEnabled()) {
-                    QUERY_LOG.debug("Executing Mongo 'aggregate' with pipeline: {}", fetchOptions.pipeline.stream().map(e -> e.toBsonDocument().toJson()).collect(Collectors.toList()));
+                    QUERY_LOG.debug("Executing Mongo 'aggregate' with pipeline: {}", pipeline.stream().map(e -> e.toBsonDocument().toJson()).collect(Collectors.toList()));
                 }
-                return Flux.from(getCollection(database, persistentEntity, persistentEntity.getIntrospection().getBeanType()).aggregate(clientSession, fetchOptions.pipeline)).hasElements();
+                return Flux.from(getCollection(database, persistentEntity, persistentEntity.getIntrospection().getBeanType())
+                                .aggregate(clientSession, pipeline)
+                                .collation(mongoPreparedQuery.getCollation()))
+                        .hasElements();
             } else {
+                Bson filter = mongoPreparedQuery.getFilterOrEmpty();
                 if (QUERY_LOG.isDebugEnabled()) {
-                    QUERY_LOG.debug("Executing exists Mongo 'find' with filter: {}", fetchOptions.filter.toBsonDocument().toJson());
+                    QUERY_LOG.debug("Executing exists Mongo 'find' with filter: {}", filter.toBsonDocument().toJson());
                 }
-                return Flux.from(getCollection(database, persistentEntity, persistentEntity.getIntrospection().getBeanType()).find(clientSession, type).limit(1).filter(fetchOptions.filter)).hasElements();
+                return Flux.from(getCollection(database, persistentEntity, persistentEntity.getIntrospection().getBeanType())
+                                .find(clientSession, type)
+                                .collation(mongoPreparedQuery.getCollation())
+                                .limit(1)
+                                .filter(filter))
+                        .hasElements();
             }
         });
     }
@@ -207,7 +206,7 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
 
     @Override
     public <T, R> Flux<R> findAll(PreparedQuery<T, R> preparedQuery) {
-        return withClientSessionMany(clientSession -> findAll(clientSession, preparedQuery, false));
+        return withClientSessionMany(clientSession -> findAll(clientSession, getMongoPreparedQuery(preparedQuery), false));
     }
 
     @Override
@@ -286,14 +285,16 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
     @Override
     public Mono<Number> executeUpdate(PreparedQuery<?, Number> preparedQuery) {
         return withClientSession(clientSession -> {
-            RuntimePersistentEntity<?> persistentEntity = runtimeEntityRegistry.getEntity(preparedQuery.getRootEntity());
-            MongoDatabase database = getDatabase(persistentEntity, preparedQuery.getRepositoryType());
-            UpdateOptions updateOptions = getUpdateOptions(database.getCodecRegistry(), preparedQuery, persistentEntity);
+            MongoPreparedQuery<?, Number, MongoDatabase> mongoPreparedQuery = getMongoPreparedQuery(preparedQuery);
+            RuntimePersistentEntity<?> persistentEntity = mongoPreparedQuery.getRuntimePersistentEntity();
+            MongoDatabase database = mongoPreparedQuery.getDatabase();
+            Bson filter = mongoPreparedQuery.getFilterOrEmpty();
+            Bson update = mongoPreparedQuery.getRequiredUpdate();
             if (QUERY_LOG.isDebugEnabled()) {
-                QUERY_LOG.debug("Executing Mongo 'updateMany' with filter: {} and update: {}", updateOptions.filter.toBsonDocument().toJson(), updateOptions.update.toBsonDocument().toJson());
+                QUERY_LOG.debug("Executing Mongo 'updateMany' with filter: {} and update: {}", filter.toBsonDocument().toJson(), update.toBsonDocument().toJson());
             }
             return Mono.from(getCollection(database, persistentEntity, persistentEntity.getIntrospection().getBeanType())
-                    .updateMany(clientSession, updateOptions.filter, updateOptions.update)).map(updateResult -> {
+                    .updateMany(clientSession, filter, update)).map(updateResult -> {
                 if (preparedQuery.isOptimisticLock()) {
                     checkOptimisticLocking(1, (int) updateResult.getModifiedCount());
                 }
@@ -305,14 +306,15 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
     @Override
     public Mono<Number> executeDelete(PreparedQuery<?, Number> preparedQuery) {
         return withClientSession(clientSession -> {
-            RuntimePersistentEntity<?> persistentEntity = runtimeEntityRegistry.getEntity(preparedQuery.getRootEntity());
-            MongoDatabase mongoDatabase = getDatabase(persistentEntity, preparedQuery.getRepositoryType());
-            DeleteOptions deleteOptions = getDeleteOptions(mongoDatabase.getCodecRegistry(), preparedQuery, persistentEntity);
+            MongoPreparedQuery<?, Number, MongoDatabase> mongoPreparedQuery = getMongoPreparedQuery(preparedQuery);
+            RuntimePersistentEntity<?> persistentEntity = mongoPreparedQuery.getRuntimePersistentEntity();
+            MongoDatabase mongoDatabase = mongoPreparedQuery.getDatabase();
+            Bson filter = mongoPreparedQuery.getFilterOrEmpty();
             if (QUERY_LOG.isDebugEnabled()) {
-                QUERY_LOG.debug("Executing Mongo 'deleteMany' with filter: {}", deleteOptions.filter.toBsonDocument().toJson());
+                QUERY_LOG.debug("Executing Mongo 'deleteMany' with filter: {}", filter.toBsonDocument().toJson());
             }
             return Mono.from(getCollection(mongoDatabase, persistentEntity, persistentEntity.getIntrospection().getBeanType())
-                    .deleteMany(clientSession, deleteOptions.filter)).map(deleteResult -> {
+                    .deleteMany(clientSession, filter)).map(deleteResult -> {
                 if (preparedQuery.isOptimisticLock()) {
                     checkOptimisticLocking(1, (int) deleteResult.getDeletedCount());
                 }
@@ -321,47 +323,61 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
         });
     }
 
-    private <T, R> Flux<R> findAll(ClientSession clientSession, PreparedQuery<T, R> preparedQuery, boolean stream) {
-        Pageable pageable = preparedQuery.getPageable();
+    private <T, R> Flux<R> findAll(ClientSession clientSession, MongoPreparedQuery<T, R, MongoDatabase> preparedQuery, boolean stream) {
+        Class<T> type = preparedQuery.getRootEntity();
+        RuntimePersistentEntity<T> persistentEntity = runtimeEntityRegistry.getEntity(type);
 
+        if (isCountQuery(preparedQuery)) {
+            return getCount(clientSession, preparedQuery).flux();
+        }
+        List<Bson> pipeline = preparedQuery.getPipeline();
+        if (pipeline == null) {
+            return findAll(clientSession, preparedQuery, preparedQuery.getFilterOrEmpty(), stream);
+        }
+        return findAllAggregated(clientSession, preparedQuery, preparedQuery.isDtoProjection(), pipeline, stream);
+    }
+
+    private <T, R> Mono<R> getCount(ClientSession clientSession, MongoPreparedQuery<T, R, MongoDatabase> preparedQuery) {
         Class<T> type = preparedQuery.getRootEntity();
         Class<R> resultType = preparedQuery.getResultType();
-        RuntimePersistentEntity<T> persistentEntity = runtimeEntityRegistry.getEntity(type);
-        MongoDatabase database = getDatabase(persistentEntity, preparedQuery.getRepositoryType());
-
-        FetchOptions fetchOptions = getFetchOptions(database.getCodecRegistry(), preparedQuery, persistentEntity);
-        if (isCountQuery(preparedQuery)) {
-            return getCount(clientSession, database, type, resultType, persistentEntity, fetchOptions).flux();
-        }
-        if (fetchOptions.pipeline == null) {
-            return findAll(clientSession, database, pageable, resultType, persistentEntity, fetchOptions.filter, stream);
-        }
-        return findAllAggregated(clientSession, database, pageable, resultType, preparedQuery.isDtoProjection(), persistentEntity, fetchOptions.pipeline, stream);
-    }
-
-    private <T, R> Mono<R> getCount(ClientSession clientSession, MongoDatabase mongoDatabase, Class<T> type, Class<R> resultType, RuntimePersistentEntity<T> persistentEntity, FetchOptions fetchOptions) {
-        if (fetchOptions.pipeline == null) {
+        MongoDatabase database = preparedQuery.getDatabase();
+        RuntimePersistentEntity<T> persistentEntity = preparedQuery.getRuntimePersistentEntity();
+        List<Bson> pipeline = preparedQuery.getPipeline();
+        if (pipeline == null) {
+            Bson filter = preparedQuery.getFilterOrEmpty();
             if (QUERY_LOG.isDebugEnabled()) {
-                QUERY_LOG.debug("Executing Mongo 'countDocuments' with filter: {}", fetchOptions.filter.toBsonDocument().toJson());
+                QUERY_LOG.debug("Executing Mongo 'countDocuments' with filter: {}", filter.toBsonDocument().toJson());
             }
-            return Mono.from(getCollection(mongoDatabase, persistentEntity, BsonDocument.class).countDocuments(clientSession, fetchOptions.filter)).map(count -> conversionService.convertRequired(count, resultType));
+            return Mono.from(getCollection(database, persistentEntity, BsonDocument.class)
+                            .countDocuments(clientSession, filter))
+                    .map(count -> conversionService.convertRequired(count, resultType));
         } else {
             if (QUERY_LOG.isDebugEnabled()) {
-                QUERY_LOG.debug("Executing Mongo 'aggregate' with pipeline: {}", fetchOptions.pipeline.stream().map(e -> e.toBsonDocument().toJson()).collect(Collectors.toList()));
+                QUERY_LOG.debug("Executing Mongo 'aggregate' with pipeline: {}", pipeline.stream().map(e -> e.toBsonDocument().toJson()).collect(Collectors.toList()));
             }
-            return Mono.from(getCollection(mongoDatabase, persistentEntity, type).aggregate(clientSession, fetchOptions.pipeline, BsonDocument.class).first()).map(bsonDocument -> convertResult(mongoDatabase.getCodecRegistry(), resultType, bsonDocument, false)).switchIfEmpty(Mono.defer(() -> Mono.just(conversionService.convertRequired(0, resultType))));
+            return Mono.from(getCollection(database, persistentEntity, type)
+                            .aggregate(clientSession, pipeline, BsonDocument.class)
+                            .collation(preparedQuery.getCollation())
+                            .first())
+                    .map(bsonDocument -> convertResult(database.getCodecRegistry(), resultType, bsonDocument, false))
+                    .switchIfEmpty(Mono.defer(() -> Mono.just(conversionService.convertRequired(0, resultType))));
         }
     }
 
-    private <T, R> Mono<R> findOneAggregated(ClientSession clientSession, PreparedQuery<T, R> preparedQuery, Class<T> type, Class<R> resultType, RuntimePersistentEntity<T> persistentEntity, MongoDatabase database, List<BsonDocument> pipeline) {
+    private <T, R> Mono<R> findOneFiltered(ClientSession clientSession, MongoPreparedQuery<T, R, MongoDatabase> preparedQuery) {
+        Class<T> type = preparedQuery.getRootEntity();
+        Class<R> resultType = preparedQuery.getResultType();
+        RuntimePersistentEntity<T> persistentEntity = preparedQuery.getRuntimePersistentEntity();
+        MongoDatabase database = preparedQuery.getDatabase();
+        Bson filter = preparedQuery.getFilterOrEmpty();
         if (QUERY_LOG.isDebugEnabled()) {
-            QUERY_LOG.debug("Executing Mongo 'aggregate' with pipeline: {}", pipeline.stream().map(e -> e.toBsonDocument().toJson()).collect(Collectors.toList()));
+            QUERY_LOG.debug("Executing Mongo 'find' with filter: {}", filter.toBsonDocument().toJson());
         }
-        boolean isProjection = pipeline.stream().anyMatch(stage -> stage.containsKey("$group") || stage.containsKey("$project"));
-        if (isProjection) {
-            return Mono.from(getCollection(database, persistentEntity, BsonDocument.class).aggregate(clientSession, pipeline, BsonDocument.class).first()).map(bsonDocument -> convertResult(database.getCodecRegistry(), resultType, bsonDocument, preparedQuery.isDtoProjection()));
-        }
-        return Mono.from(getCollection(database, persistentEntity, resultType).aggregate(clientSession, pipeline).first()).map(r -> {
+        return Mono.from(getCollection(database, persistentEntity, resultType)
+                .find(clientSession, filter, resultType)
+                .collation(preparedQuery.getCollation())
+                .limit(1)
+                .first()).map(r -> {
             if (type.isInstance(r)) {
                 return (R) triggerPostLoad(preparedQuery.getAnnotationMetadata(), persistentEntity, type.cast(r));
             }
@@ -369,22 +385,68 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
         });
     }
 
-    private <T, R> Flux<R> findAllAggregated(ClientSession clientSession, MongoDatabase database, Pageable pageable, Class<R> resultType, boolean isDtoProjection, RuntimePersistentEntity<T> persistentEntity, List<BsonDocument> pipeline, boolean stream) {
-        applyPageable(pageable, pipeline);
+    private <T, R> Mono<R> findOneAggregated(ClientSession clientSession, MongoPreparedQuery<T, R, MongoDatabase> preparedQuery, List<Bson> pipeline) {
+        Class<T> type = preparedQuery.getRootEntity();
+        Class<R> resultType = preparedQuery.getResultType();
+        MongoDatabase database = preparedQuery.getDatabase();
+        RuntimePersistentEntity<T> persistentEntity = preparedQuery.getRuntimePersistentEntity();
         if (QUERY_LOG.isDebugEnabled()) {
             QUERY_LOG.debug("Executing Mongo 'aggregate' with pipeline: {}", pipeline.stream().map(e -> e.toBsonDocument().toJson()).collect(Collectors.toList()));
         }
-        boolean isProjection = pipeline.stream().anyMatch(stage -> stage.containsKey("$group") || stage.containsKey("$project"));
+        boolean isProjection = pipeline.stream().anyMatch(stage -> {
+            BsonDocument s = stage.toBsonDocument();
+            return s.containsKey("$group") || s.containsKey("$project");
+        });
+        if (isProjection) {
+            return Mono.from(getCollection(database, persistentEntity, BsonDocument.class)
+                            .aggregate(clientSession, pipeline, BsonDocument.class)
+                            .collation(preparedQuery.getCollation())
+                            .first())
+                    .map(bsonDocument -> convertResult(database.getCodecRegistry(), resultType, bsonDocument, preparedQuery.isDtoProjection()));
+        }
+        return Mono.from(getCollection(database, persistentEntity, resultType)
+                        .aggregate(clientSession, pipeline)
+                        .collation(preparedQuery.getCollation())
+                        .first())
+                .map(r -> {
+                    if (type.isInstance(r)) {
+                        return (R) triggerPostLoad(preparedQuery.getAnnotationMetadata(), persistentEntity, type.cast(r));
+                    }
+                    return r;
+                });
+    }
+
+    private <T, R> Flux<R> findAllAggregated(ClientSession clientSession, MongoPreparedQuery<T, R, MongoDatabase> preparedQuery, boolean isDtoProjection, List<Bson> pipeline, boolean stream) {
+        Class<R> resultType = preparedQuery.getResultType();
+        MongoDatabase database = preparedQuery.getDatabase();
+        RuntimePersistentEntity<T> persistentEntity = preparedQuery.getRuntimePersistentEntity();
+        if (QUERY_LOG.isDebugEnabled()) {
+            QUERY_LOG.debug("Executing Mongo 'aggregate' with pipeline: {}", pipeline.stream().map(e -> e.toBsonDocument().toJson()).collect(Collectors.toList()));
+        }
+        boolean isProjection = pipeline.stream().anyMatch(stage -> {
+            BsonDocument s = stage.toBsonDocument();
+            return s.containsKey("$group") || s.containsKey("$project");
+        });
         Flux<R> aggregate;
         if (isProjection) {
-            aggregate = Flux.from(getCollection(database, persistentEntity, BsonDocument.class).aggregate(clientSession, pipeline, BsonDocument.class)).map(result -> convertResult(database.getCodecRegistry(), resultType, result, isDtoProjection));
+            aggregate = Flux.from(getCollection(database, persistentEntity, BsonDocument.class)
+                            .aggregate(clientSession, pipeline, BsonDocument.class)
+                            .collation(preparedQuery.getCollation())
+                    ).map(result -> convertResult(database.getCodecRegistry(), resultType, result, isDtoProjection));
         } else {
-            aggregate = Flux.from(getCollection(database, persistentEntity, resultType).aggregate(clientSession, pipeline, resultType));
+            aggregate = Flux.from(getCollection(database, persistentEntity, resultType)
+                    .aggregate(clientSession, pipeline, resultType)
+                    .collation(preparedQuery.getCollation())
+            );
         }
         return aggregate;
     }
 
-    private <T, R> Flux<R> findAll(ClientSession clientSession, MongoDatabase database, Pageable pageable, Class<R> resultType, RuntimePersistentEntity<T> persistentEntity, Bson filter, boolean stream) {
+    private <T, R> Flux<R> findAll(ClientSession clientSession, MongoPreparedQuery<T, R, MongoDatabase> preparedQuery, Bson filter, boolean stream) {
+        Class<R> resultType = preparedQuery.getResultType();
+        MongoDatabase database = preparedQuery.getDatabase();
+        RuntimePersistentEntity<T> persistentEntity = preparedQuery.getRuntimePersistentEntity();
+        Pageable pageable = preparedQuery.getPageable();
         Bson sort = null;
         int skip = 0;
         int limit = 0;
@@ -399,7 +461,12 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
         if (QUERY_LOG.isDebugEnabled()) {
             QUERY_LOG.debug("Executing Mongo 'find' with filter: {} skip: {} limit: {}", filter.toBsonDocument().toJson(), skip, limit);
         }
-        return Flux.from(getCollection(database, persistentEntity, resultType).find(clientSession, filter, resultType).skip(skip).limit(Math.max(limit, 0)).sort(sort));
+        return Flux.from(getCollection(database, persistentEntity, resultType)
+                .find(clientSession, filter, resultType)
+                .collation(preparedQuery.getCollation())
+                .skip(skip)
+                .limit(Math.max(limit, 0))
+                .sort(sort));
     }
 
     private <K> K triggerPostLoad(AnnotationMetadata annotationMetadata, RuntimePersistentEntity<K> persistentEntity, K entity) {
@@ -484,7 +551,8 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
         return database.getCollection(persistentEntity.getPersistedName(), resultType);
     }
 
-    private MongoDatabase getDatabase(PersistentEntity persistentEntity, Class<?> repositoryClass) {
+    @Override
+    protected MongoDatabase getDatabase(RuntimePersistentEntity<?> persistentEntity, Class<?> repositoryClass) {
         if (repositoryClass != null) {
             String database = repoDatabaseConfig.get(repositoryClass);
             if (database != null) {
@@ -492,6 +560,11 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
             }
         }
         return mongoDatabaseFactory.getDatabase(persistentEntity);
+    }
+
+    @Override
+    protected CodecRegistry getCodecRegistry(MongoDatabase mongoDatabase) {
+        return mongoDatabase.getCodecRegistry();
     }
 
     @Override
@@ -556,12 +629,12 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
             return Flux.usingWhen(mongoClient.startSession(),
                     cs -> function.apply(cs).contextWrite(ctx -> ctx.put(CLIENT_SESSION_CONTEXT_KEY, cs)),
                     connection -> {
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("Closing Connection for MongoDB configuration: " + serverName);
-                }
-                connection.close();
-                return Mono.empty();
-            });
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("Closing Connection for MongoDB configuration: " + serverName);
+                        }
+                        connection.close();
+                        return Mono.empty();
+                    });
         });
     }
 
