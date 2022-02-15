@@ -15,9 +15,6 @@
  */
 package io.micronaut.data.mongodb.operations;
 
-import com.mongodb.client.model.Collation;
-import com.mongodb.client.model.DeleteOptions;
-import com.mongodb.client.model.UpdateOptions;
 import io.micronaut.aop.MethodInvocationContext;
 import io.micronaut.context.BeanContext;
 import io.micronaut.core.annotation.AnnotationMetadata;
@@ -36,8 +33,6 @@ import io.micronaut.data.model.runtime.RuntimePersistentEntity;
 import io.micronaut.data.model.runtime.RuntimePersistentProperty;
 import io.micronaut.data.model.runtime.StoredQuery;
 import io.micronaut.data.mongodb.annotation.MongoRepository;
-import io.micronaut.data.mongodb.operations.options.MongoDeleteOptions;
-import io.micronaut.data.mongodb.operations.options.MongoUpdateOptions;
 import io.micronaut.data.operations.HintsCapableRepository;
 import io.micronaut.data.repository.GenericRepository;
 import io.micronaut.data.runtime.config.DataSettings;
@@ -55,7 +50,6 @@ import org.bson.BsonDocument;
 import org.bson.BsonNull;
 import org.bson.BsonValue;
 import org.bson.codecs.configuration.CodecRegistry;
-import org.bson.conversions.Bson;
 import org.slf4j.Logger;
 
 import java.util.Collection;
@@ -254,40 +248,6 @@ abstract class AbstractMongoRepositoryOperations<Dtb, Cnt, PS> extends AbstractR
             return ConversionContext.of(argument);
         }
         return ConversionContext.DEFAULT;
-    }
-
-    protected  DeleteOptions toDeleteOptions(MongoDeleteOptions mongoDeleteOptions) {
-        DeleteOptions deleteOptions = new DeleteOptions();
-        Collation collation = mongoDeleteOptions.getCollation();
-        if (collation != null) {
-            deleteOptions = deleteOptions.collation(collation);
-        }
-        Bson hint = mongoDeleteOptions.getHint();
-        if (hint != null) {
-            deleteOptions = deleteOptions.hint(hint);
-        }
-        return deleteOptions;
-    }
-
-    protected UpdateOptions toUpdateOptions(MongoUpdateOptions mongoUpdateOptions) {
-        UpdateOptions updateOptions = new UpdateOptions();
-        Collation collation = mongoUpdateOptions.getCollation();
-        if (collation != null) {
-            updateOptions = updateOptions.collation(collation);
-        }
-        Boolean upsert = mongoUpdateOptions.getUpsert();
-        if (upsert != null) {
-            updateOptions = updateOptions.upsert(upsert);
-        }
-        Boolean bypassDocumentValidation = mongoUpdateOptions.getBypassDocumentValidation();
-        if (bypassDocumentValidation != null) {
-            updateOptions = updateOptions.bypassDocumentValidation(bypassDocumentValidation);
-        }
-        Bson hint = mongoUpdateOptions.getHint();
-        if (hint != null) {
-            updateOptions = updateOptions.hint(hint);
-        }
-        return updateOptions;
     }
 
 }

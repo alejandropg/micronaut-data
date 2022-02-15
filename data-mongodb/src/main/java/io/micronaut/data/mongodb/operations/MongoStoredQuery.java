@@ -20,10 +20,6 @@ import io.micronaut.core.annotation.Experimental;
 import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.data.model.runtime.StoredQuery;
-import io.micronaut.data.mongodb.operations.options.MongoAggregateOptions;
-import io.micronaut.data.mongodb.operations.options.MongoDeleteOptions;
-import io.micronaut.data.mongodb.operations.options.MongoFindOptions;
-import io.micronaut.data.mongodb.operations.options.MongoUpdateOptions;
 import org.bson.BsonDocument;
 import org.bson.conversions.Bson;
 
@@ -44,19 +40,19 @@ public interface MongoStoredQuery<E, R> extends StoredQuery<E, R> {
         return false;
     }
 
-    default MongoAggregateOptions getAggregateOptions() {
+    default MongoAggregation getAggregation() {
         return null;
     }
 
-    default MongoFindOptions getFindOptions() {
+    default MongoFind getFind() {
         return null;
     }
 
-    default MongoUpdateOptions getUpdateOptions() {
+    default MongoUpdateMany getUpdateMany() {
         return null;
     }
 
-    default MongoDeleteOptions getDeleteOptions() {
+    default MongoDeleteMany getDeleteMany() {
         return null;
     }
 
@@ -108,18 +104,6 @@ public interface MongoStoredQuery<E, R> extends StoredQuery<E, R> {
      */
     @Nullable
     Bson getUpdate();
-
-    /**
-     * @return The update
-     */
-    @NonNull
-    default Bson getRequiredUpdate() {
-        Bson update = getUpdate();
-        if (update == null) {
-            throw new IllegalArgumentException("Update query is not provided!");
-        }
-        return update;
-    }
 
     /**
      * @return true if update value needs to replace query parameter values.

@@ -53,10 +53,8 @@ import io.micronaut.data.model.runtime.UpdateBatchOperation;
 import io.micronaut.data.model.runtime.UpdateOperation;
 import io.micronaut.data.mongodb.conf.RequiresReactiveMongo;
 import io.micronaut.data.mongodb.database.ReactiveMongoDatabaseFactory;
-import io.micronaut.data.mongodb.operations.options.MongoAggregateOptions;
-import io.micronaut.data.mongodb.operations.options.MongoDeleteOptions;
+import io.micronaut.data.mongodb.operations.options.MongoAggregationOptions;
 import io.micronaut.data.mongodb.operations.options.MongoFindOptions;
-import io.micronaut.data.mongodb.operations.options.MongoUpdateOptions;
 import io.micronaut.data.operations.reactive.ReactorReactiveRepositoryOperations;
 import io.micronaut.data.runtime.config.DataSettings;
 import io.micronaut.data.runtime.convert.DataConversionService;
@@ -273,12 +271,12 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
             MongoPreparedQuery<?, Number, MongoDatabase> mongoPreparedQuery = getMongoPreparedQuery(preparedQuery);
             RuntimePersistentEntity<?> persistentEntity = mongoPreparedQuery.getRuntimePersistentEntity();
             MongoDatabase database = mongoPreparedQuery.getDatabase();
-            MongoUpdateOptions updateOptions = mongoPreparedQuery.getUpdateOptions();
+            MongoUpdateMany updateMany = mongoPreparedQuery.getUpdateMany();
             if (QUERY_LOG.isDebugEnabled()) {
-                QUERY_LOG.debug("Executing Mongo 'updateMany' with filter: {} and update: {}", updateOptions.getFilter().toBsonDocument().toJson(), updateOptions.getUpdate().toBsonDocument().toJson());
+                QUERY_LOG.debug("Executing Mongo 'updateMany' with filter: {} and update: {}", updateMany.getFilter().toBsonDocument().toJson(), updateMany.getUpdate().toBsonDocument().toJson());
             }
             return Mono.from(getCollection(database, persistentEntity, persistentEntity.getIntrospection().getBeanType())
-                    .updateMany(clientSession, updateOptions.getFilter(), updateOptions.getUpdate(), toUpdateOptions(updateOptions))).map(updateResult -> {
+                    .updateMany(clientSession, updateMany.getFilter(), updateMany.getUpdate(), updateMany.getOptions())).map(updateResult -> {
                 if (preparedQuery.isOptimisticLock()) {
                     checkOptimisticLocking(1, (int) updateResult.getModifiedCount());
                 }
@@ -293,12 +291,12 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
             MongoPreparedQuery<?, Number, MongoDatabase> mongoPreparedQuery = getMongoPreparedQuery(preparedQuery);
             RuntimePersistentEntity<?> persistentEntity = mongoPreparedQuery.getRuntimePersistentEntity();
             MongoDatabase mongoDatabase = mongoPreparedQuery.getDatabase();
-            MongoDeleteOptions deleteOptions = mongoPreparedQuery.getDeleteOptions();
+            MongoDeleteMany deleteMany = mongoPreparedQuery.getDeleteMany();
             if (QUERY_LOG.isDebugEnabled()) {
-                QUERY_LOG.debug("Executing Mongo 'deleteMany' with filter: {}", deleteOptions.getFilter().toBsonDocument().toJson());
+                QUERY_LOG.debug("Executing Mongo 'deleteMany' with filter: {}", deleteMany.getFilter().toBsonDocument().toJson());
             }
             return Mono.from(getCollection(mongoDatabase, persistentEntity, persistentEntity.getIntrospection().getBeanType())
-                    .deleteMany(clientSession, deleteOptions.getFilter(), toDeleteOptions(deleteOptions))).map(deleteResult -> {
+                    .deleteMany(clientSession, deleteMany.getFilter(), deleteMany.getOptions())).map(deleteResult -> {
                 if (preparedQuery.isOptimisticLock()) {
                     checkOptimisticLocking(1, (int) deleteResult.getDeletedCount());
                 }
@@ -389,13 +387,13 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
     private <T, R, MR> FindPublisher<MR> find(ClientSession clientSession,
                                               MongoPreparedQuery<T, R, MongoDatabase> preparedQuery,
                                               Class<MR> resultType) {
-        MongoFindOptions findOptions = preparedQuery.getFindOptions();
+        MongoFind find = preparedQuery.getFind();
         if (QUERY_LOG.isDebugEnabled()) {
-            QUERY_LOG.debug("Executing exists Mongo 'find' with filter: {}", findOptions.getFilter() == null ? null : findOptions.getFilter().toBsonDocument().toJson());
+            QUERY_LOG.debug("Executing exists Mongo 'find' with filter: {}", find.getOptions().getFilter() == null ? null : find.getOptions().getFilter().toBsonDocument().toJson());
         }
         MongoCollection<MR> collection = getCollection(preparedQuery.getDatabase(), preparedQuery.getRuntimePersistentEntity(), resultType);
         FindPublisher<MR> findIterable = collection.find(clientSession, resultType);
-        return applyFindOptions(findOptions, findIterable);
+        return applyFindOptions(find.getOptions(), findIterable);
     }
 
     private <T, R, MR> FindPublisher<MR> applyFindOptions(MongoFindOptions findOptions, FindPublisher<MR> findIterable) {
@@ -426,12 +424,12 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
                                                         MongoPreparedQuery<T, R, MongoDatabase> preparedQuery,
                                                         Class<MR> resultType) {
         MongoCollection<MR> collection = getCollection(preparedQuery.getDatabase(), preparedQuery.getRuntimePersistentEntity(), resultType);
-        MongoAggregateOptions aggregateOptions = preparedQuery.getAggregateOptions();
+        MongoAggregation aggregation = preparedQuery.getAggregation();
         if (QUERY_LOG.isDebugEnabled()) {
-            QUERY_LOG.debug("Executing Mongo 'aggregate' with pipeline: {}", aggregateOptions.getPipeline().stream().map(e -> e.toBsonDocument().toJson()).collect(Collectors.toList()));
+            QUERY_LOG.debug("Executing Mongo 'aggregate' with pipeline: {}", aggregation.getPipeline().stream().map(e -> e.toBsonDocument().toJson()).collect(Collectors.toList()));
         }
-        AggregatePublisher<MR> aggregateIterable = collection.aggregate(clientSession, aggregateOptions.getPipeline(), resultType);
-        return applyAggregateOptions(aggregateOptions, aggregateIterable);
+        AggregatePublisher<MR> aggregateIterable = collection.aggregate(clientSession, aggregation.getPipeline(), resultType);
+        return applyAggregateOptions(aggregation.getOptions(), aggregateIterable);
     }
 
     private <T, R> AggregatePublisher<R> aggregate(ClientSession clientSession,
@@ -439,7 +437,7 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
         return aggregate(clientSession, preparedQuery, preparedQuery.getResultType());
     }
 
-    private <MR> AggregatePublisher<MR> applyAggregateOptions(MongoAggregateOptions aggregateOptions, AggregatePublisher<MR> aggregateIterable) {
+    private <MR> AggregatePublisher<MR> applyAggregateOptions(MongoAggregationOptions aggregateOptions, AggregatePublisher<MR> aggregateIterable) {
         if (aggregateOptions.getCollation() != null) {
             aggregateIterable = aggregateIterable.collation(aggregateOptions.getCollation());
         }
