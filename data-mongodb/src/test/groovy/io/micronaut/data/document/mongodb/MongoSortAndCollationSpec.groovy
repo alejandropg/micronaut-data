@@ -20,6 +20,7 @@ import io.micronaut.data.annotation.GeneratedValue
 import io.micronaut.data.annotation.Id
 import io.micronaut.data.annotation.MappedEntity
 import io.micronaut.data.mongodb.annotation.MongoCollation
+import io.micronaut.data.mongodb.annotation.MongoFindQuery
 import io.micronaut.data.mongodb.annotation.MongoRepository
 import io.micronaut.data.mongodb.annotation.MongoSort
 import io.micronaut.data.repository.CrudRepository
@@ -81,6 +82,10 @@ class MongoSortAndCollationSpec extends Specification implements MongoTestProper
             def sorted3 = numbersAlternativeRepository.findAllOrderByN().collect { it.n as float } as float[]
         then:
             sorted3 == sortedAsUsNumericOrderingAsc
+        when:
+            def findQuery = numbersRepository.queryAll().collect { it.n as float } as float[]
+        then:
+            findQuery == sortedAsUsNumericOrderingAsc
     }
 
     void 'test collation on class'() {
@@ -171,6 +176,9 @@ interface NumbersSortAlternativeRepository extends CrudRepository<MyNumber, Stri
 
 @MongoRepository
 interface NumbersRepository extends CrudRepository<MyNumber, String> {
+
+    @MongoFindQuery(value = "{}", sort = "{ n : 1 }", collation = "{ locale: 'en_US', numericOrdering: true}")
+    Iterable<MyNumber> queryAll();
 
     Iterable<MyNumber> findAllOrderByN();
 

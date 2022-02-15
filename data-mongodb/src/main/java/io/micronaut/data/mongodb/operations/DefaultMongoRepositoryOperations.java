@@ -371,6 +371,10 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
         if (sort != null) {
             findIterable = findIterable.sort(sort);
         }
+        Bson projection = findOptions.getProjection();
+        if (projection != null) {
+            findIterable = findIterable.projection(projection);
+        }
         return findIterable;
     }
 

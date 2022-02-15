@@ -262,6 +262,14 @@ abstract class AbstractMongoRepositoryOperations<Dtb, Cnt, PS> extends AbstractR
         if (filter != null) {
             sb.append(" filter: ").append(filter.toBsonDocument().toJson());
         }
+        Bson sort = options.getSort();
+        if (sort != null) {
+            sb.append(" sort: ").append(sort.toBsonDocument().toJson());
+        }
+        Bson projection = options.getProjection();
+        if (projection != null) {
+            sb.append(" projection: ").append(projection.toBsonDocument().toJson());
+        }
         Collation collation = options.getCollation();
         if (collation != null) {
             sb.append(" collation: ").append(collation);

@@ -71,6 +71,34 @@ public interface MongoStoredQuery<E, R> extends StoredQuery<E, R> {
     boolean isFilterNeedsProcessing();
 
     /**
+     * The sort.
+     * NOTE: The value shouldn't be modified.
+     *
+     * @return The sort
+     */
+    @Nullable
+    Bson getSort();
+
+    /**
+     * @return true if sort value needs to replace query parameter values.
+     */
+    boolean isSortNeedsProcessing();
+
+    /**
+     * The projection.
+     * NOTE: The value shouldn't be modified.
+     *
+     * @return The projection
+     */
+    @Nullable
+    Bson getProjection();
+
+    /**
+     * @return true if projection value needs to replace query parameter values.
+     */
+    boolean isProjectionNeedsProcessing();
+
+    /**
      * The filter or empty.
      * NOTE: The value shouldn't be modified.
      *

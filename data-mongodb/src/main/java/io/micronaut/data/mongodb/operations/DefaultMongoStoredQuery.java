@@ -22,6 +22,8 @@ import io.micronaut.data.annotation.Query;
 import io.micronaut.data.document.model.query.builder.MongoQueryBuilder;
 import io.micronaut.data.model.runtime.StoredQuery;
 import io.micronaut.data.mongodb.annotation.MongoCollation;
+import io.micronaut.data.mongodb.annotation.MongoProjection;
+import io.micronaut.data.mongodb.annotation.MongoSort;
 import io.micronaut.data.runtime.query.internal.DelegateStoredQuery;
 import org.bson.BsonArray;
 import org.bson.BsonDocument;
@@ -54,6 +56,10 @@ final class DefaultMongoStoredQuery<E, R> implements DelegateStoredQuery<E, R>, 
     private final Bson collationAsBson;
     private final boolean collationNeedsProcessing;
     private final Collation collation;
+    private final boolean sortNeedsProcessing;
+    private final Bson sort;
+    private final boolean projectionNeedsProcessing;
+    private final Bson projection;
     private final boolean isAggregate;
 
     DefaultMongoStoredQuery(StoredQuery<E, R> storedQuery) {
@@ -80,6 +86,10 @@ final class DefaultMongoStoredQuery<E, R> implements DelegateStoredQuery<E, R>, 
         collationAsBson = storedQuery.getAnnotationMetadata().stringValue(MongoCollation.class).map(BsonDocument::parse).orElse(null);
         collationNeedsProcessing = collationAsBson != null && needsProcessing(collationAsBson);
         collation = collationAsBson == null || collationNeedsProcessing ? null : MongoUtils.bsonDocumentAsCollation(collationAsBson.toBsonDocument());
+        sort = storedQuery.getAnnotationMetadata().stringValue(MongoSort.class).map(BsonDocument::parse).orElse(null);
+        sortNeedsProcessing = sort != null && needsProcessing(sort);
+        projection = storedQuery.getAnnotationMetadata().stringValue(MongoProjection.class).map(BsonDocument::parse).orElse(null);
+        projectionNeedsProcessing = projection != null && needsProcessing(projection);
         isAggregate = pipeline != null;
     }
 
@@ -155,6 +165,16 @@ final class DefaultMongoStoredQuery<E, R> implements DelegateStoredQuery<E, R>, 
     }
 
     @Override
+    public Bson getSort() {
+        return sort;
+    }
+
+    @Override
+    public Bson getProjection() {
+        return projection;
+    }
+
+    @Override
     public List<Bson> getPipeline() {
         return pipeline;
     }
@@ -167,6 +187,16 @@ final class DefaultMongoStoredQuery<E, R> implements DelegateStoredQuery<E, R>, 
     @Override
     public boolean isCollationNeedsProcessing() {
         return collationNeedsProcessing;
+    }
+
+    @Override
+    public boolean isSortNeedsProcessing() {
+        return sortNeedsProcessing;
+    }
+
+    @Override
+    public boolean isProjectionNeedsProcessing() {
+        return projectionNeedsProcessing;
     }
 
     @Override

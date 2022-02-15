@@ -115,7 +115,7 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
 
     @Override
     public MongoFind getFind() {
-        MongoFindOptions options = new MongoFindOptions().filter(getFilter()).collation(getCollation());
+        MongoFindOptions options = new MongoFindOptions().filter(getFilter()).collation(getCollation()).sort(getSort()).projection(getProjection());
         Pageable pageable = preparedQuery.getPageable();
         if (pageable != Pageable.UNPAGED) {
             options = options.limit(pageable.getSize()).skip((int) pageable.getOffset());
@@ -194,6 +194,34 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
             return null;
         }
         return mongoStoredQuery.isFilterNeedsProcessing() ? replaceQueryParameters(filter) : filter;
+    }
+
+    @Override
+    public Bson getSort() {
+        Bson sort = mongoStoredQuery.getSort();
+        if (sort == null) {
+            return null;
+        }
+        return mongoStoredQuery.isSortNeedsProcessing() ? replaceQueryParameters(sort) : sort;
+    }
+
+    @Override
+    public boolean isSortNeedsProcessing() {
+        return mongoStoredQuery.isSortNeedsProcessing();
+    }
+
+    @Override
+    public Bson getProjection() {
+        Bson projection = mongoStoredQuery.getProjection();
+        if (projection == null) {
+            return null;
+        }
+        return mongoStoredQuery.isProjectionNeedsProcessing() ? replaceQueryParameters(projection) : projection;
+    }
+
+    @Override
+    public boolean isProjectionNeedsProcessing() {
+        return mongoStoredQuery.isProjectionNeedsProcessing();
     }
 
     @Override

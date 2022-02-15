@@ -19,6 +19,7 @@ import io.micronaut.context.ApplicationContext
 import io.micronaut.data.annotation.GeneratedValue
 import io.micronaut.data.annotation.Id
 import io.micronaut.data.annotation.MappedEntity
+import io.micronaut.data.mongodb.annotation.MongoFindQuery
 import io.micronaut.data.mongodb.annotation.MongoProjection
 import io.micronaut.data.mongodb.annotation.MongoRepository
 import io.micronaut.data.repository.CrudRepository
@@ -41,6 +42,10 @@ class MongoProjectionSpec extends Specification implements MongoTestPropertyProv
     @Shared
     @Inject
     PersonProjectionRepository personProjectionRepository = applicationContext.getBean(PersonProjectionRepository)
+
+    @Shared
+    @Inject
+    PersonProjectionRepository2 personProjectionRepository2 = applicationContext.getBean(PersonProjectionRepository2)
 
     def cleanup() {
         personRepository.deleteAll()
@@ -103,6 +108,19 @@ class MongoProjectionSpec extends Specification implements MongoTestPropertyProv
             }
     }
 
+    void 'test find query projection'() {
+        when:
+            def projected = personProjectionRepository2.queryAll()
+        then:
+            projected.every {
+                !it.id
+                it.firstName
+                !it.lastName
+                it.age
+                !it.education
+            }
+    }
+
 }
 
 @MongoRepository
@@ -118,6 +136,14 @@ interface PersonRepository extends CrudRepository<XyzPerson, String> {
 @MongoProjection("{ firstName: 1, age: 1}")
 @MongoRepository
 interface PersonProjectionRepository extends CrudRepository<XyzPerson, String> {
+}
+
+@MongoRepository
+interface PersonProjectionRepository2 extends CrudRepository<XyzPerson, String> {
+
+    @MongoFindQuery(value = "{}", project = "{ firstName: 1, age: 1}")
+    Iterable<XyzPerson> queryAll();
+
 }
 
 @MappedEntity
