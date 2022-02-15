@@ -39,6 +39,10 @@ import io.micronaut.data.model.runtime.RuntimeEntityRegistry;
 import io.micronaut.data.model.runtime.RuntimePersistentEntity;
 import io.micronaut.data.model.runtime.RuntimePersistentProperty;
 import io.micronaut.data.model.runtime.convert.AttributeConverter;
+import io.micronaut.data.mongodb.operations.options.MongoAggregateOptions;
+import io.micronaut.data.mongodb.operations.options.MongoDeleteOptions;
+import io.micronaut.data.mongodb.operations.options.MongoFindOptions;
+import io.micronaut.data.mongodb.operations.options.MongoUpdateOptions;
 import io.micronaut.data.runtime.query.internal.DelegateStoredQuery;
 import org.bson.BsonArray;
 import org.bson.BsonDocument;
@@ -92,6 +96,52 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
         this.conversionService = conversionService;
         this.database = database;
         this.persistentEntity = persistentEntity;
+    }
+
+    @Override
+    public boolean isAggregate() {
+        return mongoStoredQuery.isAggregate();
+    }
+
+    @Override
+    public MongoAggregateOptions getAggregateOptions() {
+        MongoAggregateOptions options = new MongoAggregateOptions(getPipeline(), null, null,
+                null, null, getCollation(), null, null);
+        return options;
+    }
+
+    @Override
+    public MongoFindOptions getFindOptions() {
+        Pageable pageable = preparedQuery.getPageable();
+        Bson sort = null;
+        int skip = 0;
+        int limit = 0;
+        if (pageable != Pageable.UNPAGED) {
+            skip = (int) pageable.getOffset();
+            limit = pageable.getSize();
+            Sort pageableSort = pageable.getSort();
+            if (pageableSort.isSorted()) {
+                sort = pageableSort.getOrderBy().stream().map(order -> order.isAscending() ? Sorts.ascending(order.getProperty()) : Sorts.descending(order.getProperty())).collect(Collectors.collectingAndThen(Collectors.toList(), Sorts::orderBy));
+            }
+        }
+        MongoFindOptions options = new MongoFindOptions(getFilter(), null, limit, null,
+                null, null, skip, sort, null,
+                null, null, null, null, null, null, null,
+                null, null, null);
+        return options;
+    }
+
+    @Override
+    public MongoUpdateOptions getUpdateOptions() {
+        MongoUpdateOptions mongoUpdateOptions = new MongoUpdateOptions(getUpdate(), getFilterOrEmpty(), null,
+                null, getCollation(), null, null);
+        return mongoUpdateOptions;
+    }
+
+    @Override
+    public MongoDeleteOptions getDeleteOptions() {
+        MongoDeleteOptions mongoDeleteOptions = new MongoDeleteOptions(getFilterOrEmpty(), null, getCollation());
+        return mongoDeleteOptions;
     }
 
     @Override

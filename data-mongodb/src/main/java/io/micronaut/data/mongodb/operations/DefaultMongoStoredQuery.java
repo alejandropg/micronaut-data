@@ -54,6 +54,7 @@ final class DefaultMongoStoredQuery<E, R> implements DelegateStoredQuery<E, R>, 
     private final Bson collationAsBson;
     private final boolean collationNeedsProcessing;
     private final Collation collation;
+    private final boolean isAggregate;
 
     DefaultMongoStoredQuery(StoredQuery<E, R> storedQuery) {
         this(storedQuery, storedQuery.getAnnotationMetadata().stringValue(Query.class, "update").orElse(null));
@@ -79,6 +80,12 @@ final class DefaultMongoStoredQuery<E, R> implements DelegateStoredQuery<E, R>, 
         collationAsBson = storedQuery.getAnnotationMetadata().stringValue(MongoCollation.class).map(BsonDocument::parse).orElse(null);
         collationNeedsProcessing = collationAsBson != null && needsProcessing(collationAsBson);
         collation = collationAsBson == null || collationNeedsProcessing ? null : MongoUtils.bsonDocumentAsCollation(collationAsBson.toBsonDocument());
+        isAggregate = pipeline != null;
+    }
+
+    @Override
+    public boolean isAggregate() {
+        return isAggregate;
     }
 
     @Override

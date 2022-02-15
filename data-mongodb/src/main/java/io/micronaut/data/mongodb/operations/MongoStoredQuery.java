@@ -20,6 +20,10 @@ import io.micronaut.core.annotation.Experimental;
 import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.data.model.runtime.StoredQuery;
+import io.micronaut.data.mongodb.operations.options.MongoAggregateOptions;
+import io.micronaut.data.mongodb.operations.options.MongoDeleteOptions;
+import io.micronaut.data.mongodb.operations.options.MongoFindOptions;
+import io.micronaut.data.mongodb.operations.options.MongoUpdateOptions;
 import org.bson.BsonDocument;
 import org.bson.conversions.Bson;
 
@@ -35,6 +39,26 @@ import java.util.List;
  */
 @Experimental
 public interface MongoStoredQuery<E, R> extends StoredQuery<E, R> {
+
+    default boolean isAggregate() {
+        return false;
+    }
+
+    default MongoAggregateOptions getAggregateOptions() {
+        return null;
+    }
+
+    default MongoFindOptions getFindOptions() {
+        return null;
+    }
+
+    default MongoUpdateOptions getUpdateOptions() {
+        return null;
+    }
+
+    default MongoDeleteOptions getDeleteOptions() {
+        return null;
+    }
 
     /**
      * The filter.
