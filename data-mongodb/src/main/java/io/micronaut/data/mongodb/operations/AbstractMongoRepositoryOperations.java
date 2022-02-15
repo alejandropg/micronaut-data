@@ -15,6 +15,7 @@
  */
 package io.micronaut.data.mongodb.operations;
 
+import com.mongodb.client.model.Collation;
 import io.micronaut.aop.MethodInvocationContext;
 import io.micronaut.context.BeanContext;
 import io.micronaut.core.annotation.AnnotationMetadata;
@@ -33,6 +34,8 @@ import io.micronaut.data.model.runtime.RuntimePersistentEntity;
 import io.micronaut.data.model.runtime.RuntimePersistentProperty;
 import io.micronaut.data.model.runtime.StoredQuery;
 import io.micronaut.data.mongodb.annotation.MongoRepository;
+import io.micronaut.data.mongodb.operations.options.MongoAggregationOptions;
+import io.micronaut.data.mongodb.operations.options.MongoFindOptions;
 import io.micronaut.data.operations.HintsCapableRepository;
 import io.micronaut.data.repository.GenericRepository;
 import io.micronaut.data.runtime.config.DataSettings;
@@ -50,6 +53,7 @@ import org.bson.BsonDocument;
 import org.bson.BsonNull;
 import org.bson.BsonValue;
 import org.bson.codecs.configuration.CodecRegistry;
+import org.bson.conversions.Bson;
 import org.slf4j.Logger;
 
 import java.util.Collection;
@@ -57,6 +61,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Shared implementation of Mongo sync and reactive repositories.
@@ -248,6 +253,35 @@ abstract class AbstractMongoRepositoryOperations<Dtb, Cnt, PS> extends AbstractR
             return ConversionContext.of(argument);
         }
         return ConversionContext.DEFAULT;
+    }
+
+    protected void logFind(MongoFind find) {
+        MongoFindOptions options = find.getOptions();
+        StringBuilder sb = new StringBuilder();
+        Bson filter = options.getFilter();
+        if (filter != null) {
+            sb.append(" filter: ").append(filter.toBsonDocument().toJson());
+        }
+        Collation collation = options.getCollation();
+        if (collation != null) {
+            sb.append(" collation: ").append(collation);
+        }
+        if (sb.length() == 0) {
+            QUERY_LOG.debug("Executing exists Mongo 'find'");
+        } else {
+            QUERY_LOG.debug("Executing exists Mongo 'find' with" + sb);
+        }
+    }
+
+    protected void logAggregate(MongoAggregation aggregation) {
+        MongoAggregationOptions options = aggregation.getOptions();
+        StringBuilder sb = new StringBuilder();
+        sb.append(" pipeline: ").append(aggregation.getPipeline().stream().map(e -> e.toBsonDocument().toJson()).collect(Collectors.toList()));
+        Collation collation = options.getCollation();
+        if (collation != null) {
+            sb.append(" collation: ").append(collation);
+        }
+        QUERY_LOG.debug("Executing exists Mongo 'aggregate' with" + sb);
     }
 
 }

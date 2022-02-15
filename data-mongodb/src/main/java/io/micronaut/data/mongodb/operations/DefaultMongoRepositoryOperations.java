@@ -343,7 +343,7 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
                                              Class<MR> resultType) {
         MongoFind find = preparedQuery.getFind();
         if (QUERY_LOG.isDebugEnabled()) {
-            QUERY_LOG.debug("Executing exists Mongo 'find' with filter: {}", find.getOptions().getFilter() == null ? null : find.getOptions().getFilter().toBsonDocument().toJson());
+            logFind(find);
         }
         MongoCollection<MR> collection = getCollection(preparedQuery.getDatabase(), preparedQuery.getRuntimePersistentEntity(), resultType);
         FindIterable<MR> findIterable = collection.find(clientSession, resultType);
@@ -380,7 +380,7 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
         MongoCollection<MR> collection = getCollection(preparedQuery.getDatabase(), preparedQuery.getRuntimePersistentEntity(), resultType);
         MongoAggregation aggregation = preparedQuery.getAggregation();
         if (QUERY_LOG.isDebugEnabled()) {
-            QUERY_LOG.debug("Executing Mongo 'aggregate' with pipeline: {}", aggregation.getPipeline().stream().map(e -> e.toBsonDocument().toJson()).collect(Collectors.toList()));
+            logAggregate(aggregation);
         }
         AggregateIterable<MR> aggregateIterable = collection.aggregate(clientSession, aggregation.getPipeline(), resultType);
         return applyAggregateOptions(aggregation.getOptions(), aggregateIterable);
