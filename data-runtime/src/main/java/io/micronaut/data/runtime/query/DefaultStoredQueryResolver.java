@@ -75,7 +75,6 @@ public abstract class DefaultStoredQueryResolver implements StoredQueryResolver 
         );
     }
 
-
     @Override
     public <E, QR> StoredQuery<E, QR> createStoredQuery(String name,
                                                         AnnotationMetadata annotationMetadata,

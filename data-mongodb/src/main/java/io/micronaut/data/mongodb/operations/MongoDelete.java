@@ -27,7 +27,7 @@ import org.bson.conversions.Bson;
  * @since 3.3.0
  */
 @Experimental
-public final class MongoDeleteMany {
+public final class MongoDelete {
 
     private final Bson filter;
     private final DeleteOptions options;
@@ -38,7 +38,7 @@ public final class MongoDeleteMany {
      * @param filter  The delete filter
      * @param options The options
      */
-    public MongoDeleteMany(@NonNull Bson filter, @NonNull DeleteOptions options) {
+    public MongoDelete(@NonNull Bson filter, @NonNull DeleteOptions options) {
         this.filter = filter;
         this.options = options;
     }

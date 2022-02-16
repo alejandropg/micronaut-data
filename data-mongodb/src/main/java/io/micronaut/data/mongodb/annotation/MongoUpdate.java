@@ -36,6 +36,8 @@ public @interface MongoUpdate {
 
     /**
      * The custom MongoDB update query.
+     *
+     * @return The update value
      */
     String value() default "";
 }

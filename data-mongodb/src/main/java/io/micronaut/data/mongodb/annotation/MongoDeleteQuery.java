@@ -38,6 +38,8 @@ public @interface MongoDeleteQuery {
 
     /**
      * The custom MongoDB filter.
+     *
+     * @return The filter value
      */
     @AliasFor(member = "value", annotation = MongoFilter.class)
     String value() default "";

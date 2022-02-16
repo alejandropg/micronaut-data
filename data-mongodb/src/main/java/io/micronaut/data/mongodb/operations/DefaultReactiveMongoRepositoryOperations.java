@@ -16,7 +16,9 @@
 package io.micronaut.data.mongodb.operations;
 
 import com.mongodb.client.model.Collation;
+import com.mongodb.client.model.DeleteOneModel;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.UpdateOneModel;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.reactivestreams.client.AggregatePublisher;
 import com.mongodb.reactivestreams.client.ClientSession;
@@ -33,6 +35,7 @@ import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.beans.BeanProperty;
 import io.micronaut.core.convert.ConversionContext;
 import io.micronaut.core.type.Argument;
+import io.micronaut.data.annotation.TypeRole;
 import io.micronaut.data.exceptions.DataAccessException;
 import io.micronaut.data.model.DataType;
 import io.micronaut.data.model.Page;
@@ -86,9 +89,11 @@ import reactor.util.function.Tuples;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -269,19 +274,61 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
     public Mono<Number> executeUpdate(PreparedQuery<?, Number> preparedQuery) {
         return withClientSession(clientSession -> {
             MongoPreparedQuery<?, Number, MongoDatabase> mongoPreparedQuery = getMongoPreparedQuery(preparedQuery);
-            RuntimePersistentEntity<?> persistentEntity = mongoPreparedQuery.getRuntimePersistentEntity();
-            MongoDatabase database = mongoPreparedQuery.getDatabase();
-            MongoUpdate updateMany = mongoPreparedQuery.getUpdateMany();
-            if (QUERY_LOG.isDebugEnabled()) {
-                QUERY_LOG.debug("Executing Mongo 'updateMany' with filter: {} and update: {}", updateMany.getFilter().toBsonDocument().toJson(), updateMany.getUpdate().toBsonDocument().toJson());
-            }
-            return Mono.from(getCollection(database, persistentEntity, persistentEntity.getIntrospection().getBeanType())
-                    .updateMany(clientSession, updateMany.getFilter(), updateMany.getUpdate(), updateMany.getOptions())).map(updateResult -> {
-                if (preparedQuery.isOptimisticLock()) {
-                    checkOptimisticLocking(1, (int) updateResult.getModifiedCount());
+            Optional<Iterable> entities = preparedQuery.getParameterInRole(TypeRole.ENTITIES, Iterable.class);
+            if (entities.isPresent()) {
+                return updateOneInBulk(clientSession, mongoPreparedQuery, entities.get());
+            } else {
+                Optional<Object> entity = preparedQuery.getParameterInRole(TypeRole.ENTITY, (Class<Object>) preparedQuery.getRootEntity());
+                if (entity.isPresent()) {
+                    return updateOne(clientSession, (MongoPreparedQuery) mongoPreparedQuery, entity.get());
                 }
-                return updateResult.getModifiedCount();
-            });
+            }
+            return updateMany(clientSession, mongoPreparedQuery);
+        });
+    }
+
+    private <QE> Mono<Number> updateOneInBulk(ClientSession clientSession, MongoPreparedQuery<QE, Number, MongoDatabase> preparedQuery, Iterable<QE> entities) {
+        List<UpdateOneModel<QE>> updates = entities instanceof Collection ? new ArrayList<>(((Collection<QE>) entities).size()) : new ArrayList<>();
+        for (QE entity : entities) {
+            MongoUpdate updateOne = preparedQuery.getUpdateOne(entity);
+            if (QUERY_LOG.isDebugEnabled()) {
+                QUERY_LOG.debug("Executing Mongo 'updateOne' with filter: {} and update: {}", updateOne.getFilter().toBsonDocument().toJson(), updateOne.getUpdate().toBsonDocument().toJson());
+            }
+            updates.add(new UpdateOneModel<>(updateOne.getFilter(), updateOne.getUpdate(), updateOne.getOptions()));
+        }
+        return Mono.from(getCollection(preparedQuery).bulkWrite(clientSession, updates)).map(bulkWriteResult -> {
+            if (preparedQuery.isOptimisticLock()) {
+                checkOptimisticLocking(updates.size(), bulkWriteResult.getModifiedCount());
+            }
+            return bulkWriteResult.getModifiedCount();
+        });
+    }
+
+    private <QE> Mono<Number> updateOne(ClientSession clientSession, MongoPreparedQuery<QE, Number, MongoDatabase> preparedQuery, QE entity) {
+        MongoUpdate updateOne = preparedQuery.getUpdateOne(entity);
+        if (QUERY_LOG.isDebugEnabled()) {
+            QUERY_LOG.debug("Executing Mongo 'updateOne' with filter: {} and update: {}", updateOne.getFilter().toBsonDocument().toJson(), updateOne.getUpdate().toBsonDocument().toJson());
+        }
+        return Mono.from(getCollection(preparedQuery)
+                .updateOne(clientSession, updateOne.getFilter(), updateOne.getUpdate(), updateOne.getOptions())).map(updateResult -> {
+            if (preparedQuery.isOptimisticLock()) {
+                checkOptimisticLocking(1, (int) updateResult.getModifiedCount());
+            }
+            return updateResult.getModifiedCount();
+        });
+    }
+
+    private Mono<Number> updateMany(ClientSession clientSession, MongoPreparedQuery<?, Number, MongoDatabase> preparedQuery) {
+        MongoUpdate updateMany = preparedQuery.getUpdateMany();
+        if (QUERY_LOG.isDebugEnabled()) {
+            QUERY_LOG.debug("Executing Mongo 'updateMany' with filter: {} and update: {}", updateMany.getFilter().toBsonDocument().toJson(), updateMany.getUpdate().toBsonDocument().toJson());
+        }
+        return Mono.from(getCollection(preparedQuery)
+                .updateMany(clientSession, updateMany.getFilter(), updateMany.getUpdate(), updateMany.getOptions())).map(updateResult -> {
+            if (preparedQuery.isOptimisticLock()) {
+                checkOptimisticLocking(1, (int) updateResult.getModifiedCount());
+            }
+            return updateResult.getModifiedCount();
         });
     }
 
@@ -289,20 +336,66 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
     public Mono<Number> executeDelete(PreparedQuery<?, Number> preparedQuery) {
         return withClientSession(clientSession -> {
             MongoPreparedQuery<?, Number, MongoDatabase> mongoPreparedQuery = getMongoPreparedQuery(preparedQuery);
-            RuntimePersistentEntity<?> persistentEntity = mongoPreparedQuery.getRuntimePersistentEntity();
-            MongoDatabase mongoDatabase = mongoPreparedQuery.getDatabase();
-            MongoDeleteMany deleteMany = mongoPreparedQuery.getDeleteMany();
-            if (QUERY_LOG.isDebugEnabled()) {
-                QUERY_LOG.debug("Executing Mongo 'deleteMany' with filter: {}", deleteMany.getFilter().toBsonDocument().toJson());
-            }
-            return Mono.from(getCollection(mongoDatabase, persistentEntity, persistentEntity.getIntrospection().getBeanType())
-                    .deleteMany(clientSession, deleteMany.getFilter(), deleteMany.getOptions())).map(deleteResult -> {
-                if (preparedQuery.isOptimisticLock()) {
-                    checkOptimisticLocking(1, (int) deleteResult.getDeletedCount());
+            Optional<Iterable> entities = preparedQuery.getParameterInRole(TypeRole.ENTITIES, Iterable.class);
+            if (entities.isPresent()) {
+                return deleteOneInBulk(clientSession, mongoPreparedQuery, entities.get());
+            } else {
+                Optional<Object> entity = preparedQuery.getParameterInRole(TypeRole.ENTITY, (Class<Object>) preparedQuery.getRootEntity());
+                if (entity.isPresent()) {
+                    return deleteOne(clientSession, (MongoPreparedQuery) mongoPreparedQuery, entity.get());
                 }
-                return deleteResult.getDeletedCount();
-            });
+            }
+            return deleteMany(getMongoPreparedQuery(preparedQuery), clientSession);
         });
+    }
+
+    private <QE> Mono<Number> deleteOneInBulk(ClientSession clientSession, MongoPreparedQuery<QE, Number, MongoDatabase> preparedQuery, Iterable<QE> entities) {
+        List<DeleteOneModel<QE>> deletes = entities instanceof Collection ? new ArrayList<>(((Collection<QE>) entities).size()) : new ArrayList<>();
+        for (QE entity : entities) {
+            MongoDelete deleteOne = preparedQuery.getDeleteOne(entity);
+            if (QUERY_LOG.isDebugEnabled()) {
+                QUERY_LOG.debug("Executing Mongo 'deleteOne' with filter: {}", deleteOne.getFilter().toBsonDocument().toJson());
+            }
+            deletes.add(new DeleteOneModel<>(deleteOne.getFilter(), deleteOne.getOptions()));
+        }
+        return Mono.from(getCollection(preparedQuery).bulkWrite(clientSession, deletes)).map(bulkWriteResult -> {
+            if (preparedQuery.isOptimisticLock()) {
+                checkOptimisticLocking(deletes.size(), bulkWriteResult.getModifiedCount());
+            }
+            return bulkWriteResult.getDeletedCount();
+        });
+    }
+
+    private <QE> Mono<Number> deleteOne(ClientSession clientSession, MongoPreparedQuery<QE, Number, MongoDatabase> preparedQuery, QE entity) {
+        MongoDelete deleteOne = preparedQuery.getDeleteOne(entity);
+        if (QUERY_LOG.isDebugEnabled()) {
+            QUERY_LOG.debug("Executing Mongo 'deleteOne' with filter: {}", deleteOne.getFilter().toBsonDocument().toJson());
+        }
+        return Mono.from(getCollection(preparedQuery).
+                deleteOne(clientSession, deleteOne.getFilter(), deleteOne.getOptions())).map(deleteResult -> {
+            if (preparedQuery.isOptimisticLock()) {
+                checkOptimisticLocking(1, (int) deleteResult.getDeletedCount());
+            }
+            return deleteResult.getDeletedCount();
+        });
+    }
+
+    private Mono<Number> deleteMany(MongoPreparedQuery<?, Number, MongoDatabase> preparedQuery, ClientSession clientSession) {
+        MongoDelete deleteMany = preparedQuery.getDeleteMany();
+        if (QUERY_LOG.isDebugEnabled()) {
+            QUERY_LOG.debug("Executing Mongo 'deleteMany' with filter: {}", deleteMany.getFilter().toBsonDocument().toJson());
+        }
+        return Mono.from(getCollection(preparedQuery).
+                deleteMany(clientSession, deleteMany.getFilter(), deleteMany.getOptions())).map(deleteResult -> {
+            if (preparedQuery.isOptimisticLock()) {
+                checkOptimisticLocking(1, (int) deleteResult.getDeletedCount());
+            }
+            return deleteResult.getDeletedCount();
+        });
+    }
+
+    private <E> MongoCollection<E> getCollection(MongoPreparedQuery<E, ?, MongoDatabase> preparedQuery) {
+        return getCollection(preparedQuery.getDatabase(), preparedQuery.getRuntimePersistentEntity(), preparedQuery.getRootEntity());
     }
 
     private <T, R> Flux<R> findAll(ClientSession clientSession, MongoPreparedQuery<T, R, MongoDatabase> preparedQuery) {

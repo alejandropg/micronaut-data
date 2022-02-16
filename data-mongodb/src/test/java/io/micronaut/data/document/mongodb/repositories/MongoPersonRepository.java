@@ -2,6 +2,7 @@ package io.micronaut.data.document.mongodb.repositories;
 
 import io.micronaut.data.document.tck.entities.Person;
 import io.micronaut.data.document.tck.repositories.PersonRepository;
+import io.micronaut.data.mongodb.annotation.MongoDeleteQuery;
 import io.micronaut.data.mongodb.annotation.MongoRepository;
 import io.micronaut.data.mongodb.annotation.MongoUpdateQuery;
 import org.bson.BsonDocument;
@@ -19,13 +20,13 @@ public interface MongoPersonRepository extends PersonRepository {
     @MongoUpdateQuery(update = "{$set:{name: :name}}", filter = "{_id:{$eq: :id}}")
     long updateCustomOnlyNames(List<Person> people);
 
-//    @Query("DELETE FROM person WHERE name = :name")
-//    int deleteCustom(List<Person> people);
-//
-//    @Query("DELETE FROM person WHERE name = :name")
-//    int deleteCustomSingle(Person person);
-//
-//    @Query("DELETE FROM person WHERE name = :xyz")
-//    int deleteCustomSingleNoEntity(String xyz);
+    @MongoDeleteQuery("{name:{$eq: :name}}")
+    int deleteCustom(List<Person> people);
+
+    @MongoDeleteQuery("{name:{$eq: :name}}")
+    int deleteCustomSingle(Person person);
+
+    @MongoDeleteQuery("{name:{$eq: :xyz}}")
+    int deleteCustomSingleNoEntity(String xyz);
 
 }

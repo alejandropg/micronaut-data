@@ -57,8 +57,14 @@ public class DefaultDeleteAllInterceptor<T> extends AbstractQueryInterceptor<T, 
                 return convertIfNecessary(resultType, result);
             }
         } else {
-            Number result = operations.deleteAll(getDeleteBatchOperation(context, deleteEntities.get())).orElse(0);
-            return convertIfNecessary(resultType, result);
+            if (context.hasAnnotation(Query.class)) {
+                PreparedQuery<?, Number> preparedQuery = (PreparedQuery<?, Number>) prepareQuery(methodKey, context);
+                Number result = operations.executeDelete(preparedQuery).orElse(0);
+                return convertIfNecessary(resultType, result);
+            } else {
+                Number result = operations.deleteAll(getDeleteBatchOperation(context, deleteEntities.get())).orElse(0);
+                return convertIfNecessary(resultType, result);
+            }
         }
     }
 

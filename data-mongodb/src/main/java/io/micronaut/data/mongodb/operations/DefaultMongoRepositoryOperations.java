@@ -25,6 +25,7 @@ import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.MongoIterable;
 import com.mongodb.client.model.Collation;
+import com.mongodb.client.model.DeleteOneModel;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.UpdateOneModel;
 import com.mongodb.client.result.DeleteResult;
@@ -486,7 +487,6 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
                     return updateOne(clientSession, (MongoPreparedQuery) mongoPreparedQuery, entity.get());
                 }
             }
-
             return updateMany(clientSession, mongoPreparedQuery);
         });
     }
@@ -502,7 +502,7 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
         }
         BulkWriteResult bulkWriteResult = getCollection(preparedQuery).bulkWrite(clientSession, updates);
         if (preparedQuery.isOptimisticLock()) {
-            checkOptimisticLocking(1, bulkWriteResult.getModifiedCount());
+            checkOptimisticLocking(updates.size(), bulkWriteResult.getModifiedCount());
         }
         return Optional.of(bulkWriteResult.getModifiedCount());
     }
@@ -537,19 +537,60 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
     public Optional<Number> executeDelete(PreparedQuery<?, Number> preparedQuery) {
         return withClientSession(clientSession -> {
             MongoPreparedQuery<?, Number, MongoDatabase> mongoPreparedQuery = getMongoPreparedQuery(preparedQuery);
-            MongoDeleteMany deleteMany = mongoPreparedQuery.getDeleteMany();
-            if (QUERY_LOG.isDebugEnabled()) {
-                QUERY_LOG.debug("Executing Mongo 'deleteMany' with filter: {}", deleteMany.getFilter().toBsonDocument().toJson());
+            Optional<Iterable> entities = preparedQuery.getParameterInRole(TypeRole.ENTITIES, Iterable.class);
+            if (entities.isPresent()) {
+                return deleteOneInBulk(clientSession, mongoPreparedQuery, entities.get());
+            } else {
+                Optional<Object> entity = preparedQuery.getParameterInRole(TypeRole.ENTITY, (Class<Object>) preparedQuery.getRootEntity());
+                if (entity.isPresent()) {
+                    return deleteOne(clientSession, (MongoPreparedQuery) mongoPreparedQuery, entity.get());
+                }
             }
-            DeleteResult deleteResult = getCollection(mongoPreparedQuery).
-                    deleteMany(clientSession, deleteMany.getFilter(), deleteMany.getOptions());
-            if (preparedQuery.isOptimisticLock()) {
-                checkOptimisticLocking(1, (int) deleteResult.getDeletedCount());
-            }
-            return Optional.of(deleteResult.getDeletedCount());
+            return deleteMany(getMongoPreparedQuery(preparedQuery), clientSession);
         });
     }
 
+    private <QE> Optional<Number> deleteOneInBulk(ClientSession clientSession, MongoPreparedQuery<QE, Number, MongoDatabase> preparedQuery, Iterable<QE> entities) {
+        List<DeleteOneModel<QE>> deletes = entities instanceof Collection ? new ArrayList<>(((Collection<QE>) entities).size()) : new ArrayList<>();
+        for (QE entity : entities) {
+            MongoDelete deleteOne = preparedQuery.getDeleteOne(entity);
+            if (QUERY_LOG.isDebugEnabled()) {
+                QUERY_LOG.debug("Executing Mongo 'deleteOne' with filter: {}", deleteOne.getFilter().toBsonDocument().toJson());
+            }
+            deletes.add(new DeleteOneModel<>(deleteOne.getFilter(), deleteOne.getOptions()));
+        }
+        BulkWriteResult bulkWriteResult = getCollection(preparedQuery).bulkWrite(clientSession, deletes);
+        if (preparedQuery.isOptimisticLock()) {
+            checkOptimisticLocking(deletes.size(), bulkWriteResult.getModifiedCount());
+        }
+        return Optional.of(bulkWriteResult.getDeletedCount());
+    }
+
+    private <QE> Optional<Number> deleteOne(ClientSession clientSession, MongoPreparedQuery<QE, Number, MongoDatabase> preparedQuery, QE entity) {
+        MongoDelete deleteOne = preparedQuery.getDeleteOne(entity);
+        if (QUERY_LOG.isDebugEnabled()) {
+            QUERY_LOG.debug("Executing Mongo 'deleteOne' with filter: {}", deleteOne.getFilter().toBsonDocument().toJson());
+        }
+        DeleteResult deleteResult = getCollection(preparedQuery).
+                deleteOne(clientSession, deleteOne.getFilter(), deleteOne.getOptions());
+        if (preparedQuery.isOptimisticLock()) {
+            checkOptimisticLocking(1, (int) deleteResult.getDeletedCount());
+        }
+        return Optional.of(deleteResult.getDeletedCount());
+    }
+
+    private Optional<Number> deleteMany(MongoPreparedQuery<?, Number, MongoDatabase> preparedQuery, ClientSession clientSession) {
+        MongoDelete deleteMany = preparedQuery.getDeleteMany();
+        if (QUERY_LOG.isDebugEnabled()) {
+            QUERY_LOG.debug("Executing Mongo 'deleteMany' with filter: {}", deleteMany.getFilter().toBsonDocument().toJson());
+        }
+        DeleteResult deleteResult = getCollection(preparedQuery).
+                deleteMany(clientSession, deleteMany.getFilter(), deleteMany.getOptions());
+        if (preparedQuery.isOptimisticLock()) {
+            checkOptimisticLocking(1, (int) deleteResult.getDeletedCount());
+        }
+        return Optional.of(deleteResult.getDeletedCount());
+    }
 
     private <E> MongoCollection<E> getCollection(MongoPreparedQuery<E, ?, MongoDatabase> preparedQuery) {
         return getCollection(preparedQuery.getDatabase(), preparedQuery.getRuntimePersistentEntity(), preparedQuery.getRootEntity());

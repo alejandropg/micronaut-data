@@ -38,14 +38,17 @@ public @interface MongoUpdateQuery {
 
     /**
      * The custom MongoDB filter.
+     *
+     * @return The filter value
      */
     @AliasFor(member = "value", annotation = MongoFilter.class)
     String filter();
 
     /**
      * The custom MongoDB filter.
+     *
+     * @return The update value
      */
-//    @AliasFor(member = "value", annotation = MongoUpdate.class)
     String update();
 
     /**

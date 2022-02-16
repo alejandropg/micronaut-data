@@ -39,6 +39,8 @@ public @interface MongoFilter {
 
     /**
      * The custom MongoDB filter query.
+     *
+     * @return The filter value
      */
     @AliasFor(member = "value", annotation = Query.class)
     String value() default "";

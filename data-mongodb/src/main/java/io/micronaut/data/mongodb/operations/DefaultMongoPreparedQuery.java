@@ -149,9 +149,15 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
     }
 
     @Override
-    public MongoDeleteMany getDeleteMany() {
+    public MongoDelete getDeleteMany() {
         DeleteOptions options = new DeleteOptions().collation(getCollation());
-        return new MongoDeleteMany(getFilterOrEmpty(), options);
+        return new MongoDelete(getFilterOrEmpty(), options);
+    }
+
+    @Override
+    public MongoDelete getDeleteOne(E entity) {
+        DeleteOptions options = new DeleteOptions().collation(getCollation());
+        return new MongoDelete(getFilterOrEmpty(entity), options);
     }
 
     @Override

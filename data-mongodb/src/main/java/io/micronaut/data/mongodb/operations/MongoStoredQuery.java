@@ -56,7 +56,11 @@ public interface MongoStoredQuery<E, R> extends StoredQuery<E, R> {
         return null;
     }
 
-    default MongoDeleteMany getDeleteMany() {
+    default MongoDelete getDeleteMany() {
+        return null;
+    }
+
+    default MongoDelete getDeleteOne(E entity) {
         return null;
     }
 
