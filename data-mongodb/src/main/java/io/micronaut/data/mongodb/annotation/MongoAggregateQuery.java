@@ -16,6 +16,7 @@
 package io.micronaut.data.mongodb.annotation;
 
 import io.micronaut.context.annotation.AliasFor;
+import io.micronaut.data.annotation.Query;
 
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;
@@ -25,7 +26,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Defines a custom MongoDB query for finding results.
+ * Defines a custom MongoDB query for aggregating results.
  *
  * @author Denis Stepanov
  * @since 3.3.0
@@ -34,14 +35,17 @@ import java.lang.annotation.Target;
 @Target(ElementType.METHOD)
 @Documented
 @Inherited
-public @interface MongoFindQuery {
+public @interface MongoAggregateQuery {
 
     /**
-     * The custom MongoDB filter query.
+     * The custom MongoDB query represented in JSON. The filter is represented as a JSON object '{...}' or pipeline query is a JSON array of stages '[{...}, {...}]'.
+     * <p>
+     * If the query starts with '[' it's assumed that it's a pipeline query and `aggregate` method should be executed otherwise it's filter query and `find` should be used.
+     * NOTE: The actual execution might be the aggregation if there are multiple stages like sort, fileds etc defined.
      *
      * @return The query
      */
-    @AliasFor(member = "value", annotation = MongoFilter.class)
+    @AliasFor(member = "value", annotation = Query.class)
     String value() default "";
 
     /**

@@ -25,7 +25,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Defines a custom MongoDB query for finding results.
+ * Defines a custom MongoDB delete query.
  *
  * @author Denis Stepanov
  * @since 3.3.0
@@ -34,31 +34,13 @@ import java.lang.annotation.Target;
 @Target(ElementType.METHOD)
 @Documented
 @Inherited
-public @interface MongoFindQuery {
+public @interface MongoDeleteQuery {
 
     /**
-     * The custom MongoDB filter query.
-     *
-     * @return The query
+     * The custom MongoDB filter.
      */
     @AliasFor(member = "value", annotation = MongoFilter.class)
     String value() default "";
-
-    /**
-     * The custom sorting represented in JSON.
-     *
-     * @return The sort
-     */
-    @AliasFor(member = "value", annotation = MongoSort.class)
-    String sort() default "";
-
-    /**
-     * The custom fields projections represented in JSON.
-     *
-     * @return The fields
-     */
-    @AliasFor(member = "value", annotation = MongoProjection.class)
-    String project() default "";
 
     /**
      * The custom collation represented in JSON.

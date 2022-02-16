@@ -15,8 +15,6 @@
  */
 package io.micronaut.data.mongodb.annotation;
 
-import io.micronaut.context.annotation.AliasFor;
-
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Inherited;
@@ -25,7 +23,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Defines a custom MongoDB query for finding results.
+ * Defines a custom MongoDB update query.
  *
  * @author Denis Stepanov
  * @since 3.3.0
@@ -34,37 +32,10 @@ import java.lang.annotation.Target;
 @Target(ElementType.METHOD)
 @Documented
 @Inherited
-public @interface MongoFindQuery {
+public @interface MongoUpdate {
 
     /**
-     * The custom MongoDB filter query.
-     *
-     * @return The query
+     * The custom MongoDB update query.
      */
-    @AliasFor(member = "value", annotation = MongoFilter.class)
     String value() default "";
-
-    /**
-     * The custom sorting represented in JSON.
-     *
-     * @return The sort
-     */
-    @AliasFor(member = "value", annotation = MongoSort.class)
-    String sort() default "";
-
-    /**
-     * The custom fields projections represented in JSON.
-     *
-     * @return The fields
-     */
-    @AliasFor(member = "value", annotation = MongoProjection.class)
-    String project() default "";
-
-    /**
-     * The custom collation represented in JSON.
-     *
-     * @return The collation
-     */
-    @AliasFor(member = "value", annotation = MongoCollation.class)
-    String collation() default "";
 }

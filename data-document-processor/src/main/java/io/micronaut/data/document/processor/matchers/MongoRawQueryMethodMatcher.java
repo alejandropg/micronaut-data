@@ -20,6 +20,7 @@ import io.micronaut.core.annotation.Introspected;
 import io.micronaut.core.annotation.NonNull;
 import io.micronaut.data.annotation.MappedEntity;
 import io.micronaut.data.annotation.Query;
+import io.micronaut.data.annotation.TypeRole;
 import io.micronaut.data.document.mongo.MongoAnnotations;
 import io.micronaut.data.intercept.DataInterceptor;
 import io.micronaut.data.model.PersistentPropertyPath;
@@ -33,6 +34,7 @@ import io.micronaut.data.processor.visitors.MethodMatchContext;
 import io.micronaut.data.processor.visitors.finders.FindersUtils;
 import io.micronaut.data.processor.visitors.finders.MethodMatchInfo;
 import io.micronaut.data.processor.visitors.finders.MethodMatcher;
+import io.micronaut.data.processor.visitors.finders.TypeUtils;
 import io.micronaut.inject.ast.ClassElement;
 import io.micronaut.inject.ast.MethodElement;
 import io.micronaut.inject.ast.ParameterElement;
@@ -44,7 +46,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 /**
  * Finder with custom defied query used to return a single result.
@@ -74,49 +75,73 @@ public class MongoRawQueryMethodMatcher implements MethodMatcher {
             return null;
         }
         if (matchContext.getMethodElement().hasAnnotation(MongoAnnotations.FIND_QUERY)) {
-            return new MethodMatch() {
-
-                @Override
-                public MethodMatchInfo buildMatchInfo(MethodMatchContext matchContext) {
-                    MethodMatchInfo.OperationType operationType = MethodMatchInfo.OperationType.QUERY;
-
-                    Map.Entry<ClassElement, Class<? extends DataInterceptor>> entry = FindersUtils.resolveInterceptorTypeByOperationType(
-                            false,
-                            false,
-                            operationType,
-                            matchContext);
-
-                    ClassElement resultType = entry.getKey();
-                    Class<? extends DataInterceptor> interceptorType = entry.getValue();
-
-                    boolean isDto = false;
-                    if (resultType == null) {
-                        resultType = matchContext.getRootEntity().getType();
-                    } else {
-                        if (resultType.hasAnnotation(Introspected.class)) {
-                            if (!resultType.hasAnnotation(MappedEntity.class)) {
-                                isDto = true;
-                            }
-                        }
-                    }
-
-                    MethodMatchInfo methodMatchInfo = new MethodMatchInfo(
-                            resultType,
-                            FindersUtils.getInterceptorElement(matchContext, interceptorType)
-                    );
-
-                    methodMatchInfo.dto(isDto);
-
-                    buildRawQuery(matchContext, methodMatchInfo, null, null, operationType);
-
-                    return methodMatchInfo;
-                }
-            };
+            return methodMatchByFilterQuery(MethodMatchInfo.OperationType.QUERY);
+        }
+        if (matchContext.getMethodElement().hasAnnotation(MongoAnnotations.DELETE_QUERY)) {
+            return methodMatchByFilterQuery(MethodMatchInfo.OperationType.DELETE);
+        }
+        if (matchContext.getMethodElement().hasAnnotation(MongoAnnotations.UPDATE_QUERY)) {
+            return methodMatchByFilterQuery(MethodMatchInfo.OperationType.UPDATE);
         }
         if (matchContext.getMethodElement().stringValue(Query.class).isPresent()) {
             throw new MatchFailedException("`@Query` annotations is not supported for MongoDB repositories. Use one of the annotations from `io.micronaut.data.mongodb.annotation` for a custom query.");
         }
         return null;
+    }
+
+    private MethodMatch methodMatchByFilterQuery(MethodMatchInfo.OperationType operationType) {
+        return new MethodMatch() {
+
+            @Override
+            public MethodMatchInfo buildMatchInfo(MethodMatchContext matchContext) {
+                ParameterElement[] parameters = matchContext.getParameters();
+                ParameterElement entityParameter;
+                ParameterElement entitiesParameter;
+                if (parameters.length > 1) {
+                    entityParameter = null;
+                    entitiesParameter = null;
+                } else {
+                    entityParameter = Arrays.stream(parameters).filter(p -> TypeUtils.isEntity(p.getGenericType())).findFirst().orElse(null);
+                    entitiesParameter = Arrays.stream(parameters).filter(p -> TypeUtils.isIterableOfEntity(p.getGenericType())).findFirst().orElse(null);
+                }
+
+                Map.Entry<ClassElement, Class<? extends DataInterceptor>> entry = FindersUtils.resolveInterceptorTypeByOperationType(
+                        false,
+                        false,
+                        operationType,
+                        matchContext);
+
+                ClassElement resultType = entry.getKey();
+                Class<? extends DataInterceptor> interceptorType = entry.getValue();
+
+                boolean isDto = false;
+                if (resultType == null) {
+                    resultType = matchContext.getRootEntity().getType();
+                } else {
+                    if (resultType.hasAnnotation(Introspected.class)) {
+                        if (!resultType.hasAnnotation(MappedEntity.class)) {
+                            isDto = true;
+                        }
+                    }
+                }
+
+                MethodMatchInfo methodMatchInfo = new MethodMatchInfo(
+                        resultType,
+                        FindersUtils.getInterceptorElement(matchContext, interceptorType)
+                );
+
+                methodMatchInfo.dto(isDto);
+
+                buildRawQuery(matchContext, methodMatchInfo, entityParameter, entitiesParameter, operationType);
+
+                if (entityParameter != null) {
+                    methodMatchInfo.addParameterRole(TypeRole.ENTITY, entityParameter.getName());
+                } else if (entitiesParameter != null) {
+                    methodMatchInfo.addParameterRole(TypeRole.ENTITIES, entitiesParameter.getName());
+                }
+                return methodMatchInfo;
+            }
+        };
     }
 
     private void buildRawQuery(@NonNull MethodMatchContext matchContext,
@@ -125,9 +150,6 @@ public class MongoRawQueryMethodMatcher implements MethodMatcher {
                                ParameterElement entitiesParameter,
                                MethodMatchInfo.OperationType operationType) {
         MethodElement methodElement = matchContext.getMethodElement();
-        String queryString = methodElement.stringValue(MongoAnnotations.FIND_QUERY).orElseThrow(() ->
-                new IllegalStateException("Should only be called if Query has value!")
-        );
         List<ParameterElement> parameters = Arrays.asList(matchContext.getParameters());
         ParameterElement entityParam = null;
         SourcePersistentEntity persistentEntity = null;
@@ -139,13 +161,20 @@ public class MongoRawQueryMethodMatcher implements MethodMatcher {
             persistentEntity = matchContext.getEntity(entitiesParameter.getGenericType().getFirstTypeArgument().get());
         }
 
-        QueryResult queryResult = getQueryResult(matchContext, queryString, parameters, entityParam, persistentEntity);
-//        String cq = matchContext.getAnnotationMetadata().stringValue(Query.class, "countQuery")
-//                .orElse(null);
-//        QueryResult countQueryResult = cq == null ? null : getQueryResult(matchContext, cq, parameters, entityParam, persistentEntity);
+        QueryResult queryResult;
+        if (operationType == MethodMatchInfo.OperationType.UPDATE) {
+            queryResult = getUpdateQueryResult(matchContext, parameters, entityParam, persistentEntity);
+        } else {
+            queryResult = getQueryResult(matchContext, parameters, entityParam, persistentEntity);
+        }
         boolean encodeEntityParameters = persistentEntity != null || operationType == MethodMatchInfo.OperationType.INSERT;
 
-        methodElement.annotate(Query.class, builder -> builder.value(queryResult.getQuery()));
+        methodElement.annotate(Query.class, builder -> {
+            if (queryResult.getUpdate() != null) {
+                builder.member("update", queryResult.getUpdate());
+            }
+            builder.value(queryResult.getQuery());
+        });
 
         methodMatchInfo
                 .isRawQuery(true)
@@ -155,12 +184,80 @@ public class MongoRawQueryMethodMatcher implements MethodMatcher {
     }
 
     private QueryResult getQueryResult(MethodMatchContext matchContext,
-                                       String queryString,
                                        List<ParameterElement> parameters,
                                        ParameterElement entityParam,
                                        SourcePersistentEntity persistentEntity) {
-        java.util.regex.Matcher matcher = VARIABLE_PATTERN.matcher(queryString);
+        String filterQueryString = matchContext.getMethodElement().stringValue(MongoAnnotations.FILTER).orElseThrow(() ->
+                new IllegalStateException("Should only be called if Query has value!")
+        );
         List<QueryParameterBinding> parameterBindings = new ArrayList<>(parameters.size());
+        String filterQuery = processCustomQuery(matchContext, filterQueryString, parameters, entityParam, persistentEntity, parameterBindings);
+        return new QueryResult() {
+            @Override
+            public String getQuery() {
+                return filterQuery;
+            }
+
+            @Override
+            public List<String> getQueryParts() {
+                return Collections.emptyList();
+            }
+
+            @Override
+            public List<QueryParameterBinding> getParameterBindings() {
+                return parameterBindings;
+            }
+
+            @Override
+            public Map<String, String> getAdditionalRequiredParameters() {
+                return Collections.emptyMap();
+            }
+        };
+    }
+
+    private QueryResult getUpdateQueryResult(MethodMatchContext matchContext,
+                                       List<ParameterElement> parameters,
+                                       ParameterElement entityParam,
+                                       SourcePersistentEntity persistentEntity) {
+        String filterQueryString = matchContext.getMethodElement().stringValue(MongoAnnotations.FILTER).orElseThrow(() ->
+                new IllegalStateException("Filter query is missing!")
+        );
+        String updateQueryString = matchContext.getMethodElement().stringValue(MongoAnnotations.UPDATE_QUERY, "update").orElseThrow(() ->
+                new IllegalStateException("Update query is missing!")
+        );
+        List<QueryParameterBinding> parameterBindings = new ArrayList<>(parameters.size());
+        String filterQuery = processCustomQuery(matchContext, filterQueryString, parameters, entityParam, persistentEntity, parameterBindings);
+        String updateQuery = processCustomQuery(matchContext, updateQueryString, parameters, entityParam, persistentEntity, parameterBindings);
+        return new QueryResult() {
+            @Override
+            public String getQuery() {
+                return filterQuery;
+            }
+
+            @Override
+            public String getUpdate() {
+                return updateQuery;
+            }
+
+            @Override
+            public List<String> getQueryParts() {
+                return Collections.emptyList();
+            }
+
+            @Override
+            public List<QueryParameterBinding> getParameterBindings() {
+                return parameterBindings;
+            }
+
+            @Override
+            public Map<String, String> getAdditionalRequiredParameters() {
+                return Collections.emptyMap();
+            }
+        };
+    }
+
+    private String processCustomQuery(MethodMatchContext matchContext, String queryString, List<ParameterElement> parameters, ParameterElement entityParam, SourcePersistentEntity persistentEntity, List<QueryParameterBinding> parameterBindings) {
+        java.util.regex.Matcher matcher = VARIABLE_PATTERN.matcher(queryString);
         List<String> queryParts = new ArrayList<>();
         boolean requiresEnd = true;
         while (matcher.find()) {
@@ -210,28 +307,8 @@ public class MongoRawQueryMethodMatcher implements MethodMatcher {
         } else if (requiresEnd) {
             queryParts.add("");
         }
-        String query = queryParts.stream().collect(Collectors.joining());
-        return new QueryResult() {
-            @Override
-            public String getQuery() {
-                return query;
-            }
-
-            @Override
-            public List<String> getQueryParts() {
-                return queryParts;
-            }
-
-            @Override
-            public List<QueryParameterBinding> getParameterBindings() {
-                return parameterBindings;
-            }
-
-            @Override
-            public Map<String, String> getAdditionalRequiredParameters() {
-                return Collections.emptyMap();
-            }
-        };
+        String query = String.join("", queryParts);
+        return query;
     }
 
     private SourceParameterExpressionImpl bindingParameter(MethodMatchContext matchContext, ParameterElement element) {

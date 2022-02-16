@@ -215,6 +215,9 @@ abstract class AbstractMongoRepositoryOperations<Dtb, Cnt, PS> extends AbstractR
                                   Class<R> resultType,
                                   BsonDocument result,
                                   boolean isDtoProjection) {
+        if (resultType == BsonDocument.class) {
+            return (R) result;
+        }
         BsonValue value;
         if (result == null) {
             value = BsonNull.VALUE;

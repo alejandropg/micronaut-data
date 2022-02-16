@@ -172,24 +172,25 @@ public class QueryCriteriaMethodMatch extends AbstractCriteriaMethodMatch {
 
         boolean isDto = resultType != null
                 && !TypeUtils.areTypesCompatible(resultType, queryResultType)
-                && resultType.hasStereotype(Introspected.class)
-                && queryResultType.hasStereotype(MappedEntity.class);
+                && (isDtoType(resultType) || resultType.hasStereotype(Introspected.class) && queryResultType.hasStereotype(MappedEntity.class));
 
         if (isDto) {
-            List<SourcePersistentProperty> dtoProjectionProperties = getDtoProjectionProperties(matchContext.getRootEntity(), resultType);
-            if (!dtoProjectionProperties.isEmpty()) {
-                Root<?> root = query.getRoots().iterator().next();
-                query.multiselect(
-                        dtoProjectionProperties.stream()
-                                .map(p -> {
-                                    if (matchContext.getQueryBuilder().shouldAliasProjections()) {
-                                        return root.get(p.getName()).alias(p.getName());
-                                    } else {
-                                        return root.get(p.getName());
-                                    }
-                                })
-                                .collect(Collectors.toList())
-                );
+            if (!isDtoType(resultType)) {
+                List<SourcePersistentProperty> dtoProjectionProperties = getDtoProjectionProperties(matchContext.getRootEntity(), resultType);
+                if (!dtoProjectionProperties.isEmpty()) {
+                    Root<?> root = query.getRoots().iterator().next();
+                    query.multiselect(
+                            dtoProjectionProperties.stream()
+                                    .map(p -> {
+                                        if (matchContext.getQueryBuilder().shouldAliasProjections()) {
+                                            return root.get(p.getName()).alias(p.getName());
+                                        } else {
+                                            return root.get(p.getName());
+                                        }
+                                    })
+                                    .collect(Collectors.toList())
+                    );
+                }
             }
         } else {
             if (resultType == null || (!resultType.isAssignable(void.class) && !resultType.isAssignable(Void.class))) {
@@ -256,6 +257,13 @@ public class QueryCriteriaMethodMatch extends AbstractCriteriaMethodMatch {
                 .optimisticLock(optimisticLock)
                 .queryResult(queryResult)
                 .countQueryResult(countQueryResult);
+    }
+
+    private boolean isDtoType(ClassElement classElement) {
+        if (classElement.getName().equals("org.bson.BsonDocument")) {
+            return true;
+        }
+        return false;
     }
 
     private List<SourcePersistentProperty> getDtoProjectionProperties(SourcePersistentEntity entity,

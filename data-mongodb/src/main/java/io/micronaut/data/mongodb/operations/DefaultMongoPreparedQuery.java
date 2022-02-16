@@ -129,13 +129,23 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
     }
 
     @Override
-    public MongoUpdateMany getUpdateMany() {
+    public MongoUpdate getUpdateMany() {
         Bson update = getUpdate();
         if (update == null) {
             throw new IllegalStateException("Update query is not provided!");
         }
         UpdateOptions options = new UpdateOptions().collation(getCollation());
-        return new MongoUpdateMany(update, getFilterOrEmpty(), options);
+        return new MongoUpdate(update, getFilterOrEmpty(), options);
+    }
+
+    @Override
+    public MongoUpdate getUpdateOne(E entity) {
+        Bson update = getUpdate(entity);
+        if (update == null) {
+            throw new IllegalStateException("Update query is not provided!");
+        }
+        UpdateOptions options = new UpdateOptions().collation(getCollation());
+        return new MongoUpdate(update, getFilterOrEmpty(entity), options);
     }
 
     @Override
@@ -179,7 +189,7 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
         if (collation == null) {
             return null;
         }
-        return mongoStoredQuery.isCollationNeedsProcessing() ? replaceQueryParameters(collation) : collation;
+        return mongoStoredQuery.isCollationNeedsProcessing() ? replaceQueryParameters(collation, null) : collation;
     }
 
     @Override
@@ -193,7 +203,15 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
         if (filter == null) {
             return null;
         }
-        return mongoStoredQuery.isFilterNeedsProcessing() ? replaceQueryParameters(filter) : filter;
+        return mongoStoredQuery.isFilterNeedsProcessing() ? replaceQueryParameters(filter, null) : filter;
+    }
+
+    public Bson getFilterOrEmpty(E entity) {
+        Bson filter = mongoStoredQuery.getFilter();
+        if (filter == null) {
+            return new BsonDocument();
+        }
+        return mongoStoredQuery.isFilterNeedsProcessing() ? replaceQueryParameters(filter, entity) : filter;
     }
 
     @Override
@@ -202,7 +220,7 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
         if (sort == null) {
             return null;
         }
-        return mongoStoredQuery.isSortNeedsProcessing() ? replaceQueryParameters(sort) : sort;
+        return mongoStoredQuery.isSortNeedsProcessing() ? replaceQueryParameters(sort, null) : sort;
     }
 
     @Override
@@ -216,7 +234,7 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
         if (projection == null) {
             return null;
         }
-        return mongoStoredQuery.isProjectionNeedsProcessing() ? replaceQueryParameters(projection) : projection;
+        return mongoStoredQuery.isProjectionNeedsProcessing() ? replaceQueryParameters(projection, null) : projection;
     }
 
     @Override
@@ -240,7 +258,7 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
             pipeline = new ArrayList<>(pipeline);
             applyPageable(pageable, pipeline);
         }
-        return mongoStoredQuery.isPipelineNeedsProcessing() ? replaceQueryParametersInList(pipeline) : pipeline;
+        return mongoStoredQuery.isPipelineNeedsProcessing() ? replaceQueryParametersInList(pipeline, null) : pipeline;
     }
 
     @Override
@@ -254,7 +272,15 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
         if (update == null) {
             return null;
         }
-        return mongoStoredQuery.isUpdateNeedsProcessing() ? replaceQueryParameters(update) : update;
+        return mongoStoredQuery.isUpdateNeedsProcessing() ? replaceQueryParameters(update, null) : update;
+    }
+
+    public Bson getUpdate(E entity) {
+        Bson update = mongoStoredQuery.getUpdate();
+        if (update == null) {
+            return null;
+        }
+        return mongoStoredQuery.isUpdateNeedsProcessing() ? replaceQueryParameters(update, entity) : update;
     }
 
     @Override
@@ -262,18 +288,18 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
         return mongoStoredQuery.isUpdateNeedsProcessing();
     }
 
-    private Bson replaceQueryParameters(Bson value) {
+    private Bson replaceQueryParameters(Bson value, E entity) {
         if (value instanceof BsonDocument) {
-            return (BsonDocument) replaceQueryParametersInBsonValue(((BsonDocument) value).clone());
+            return (BsonDocument) replaceQueryParametersInBsonValue(((BsonDocument) value).clone(), entity);
         }
         throw new IllegalStateException("Unrecognized value: " + value);
     }
 
-    private <T> List<Bson> replaceQueryParametersInList(List<Bson> values) {
+    private <T> List<Bson> replaceQueryParametersInList(List<Bson> values, E entity) {
         values = new ArrayList<>(values);
         for (int i = 0; i < values.size(); i++) {
             Bson value = values.get(i);
-            Bson newValue = replaceQueryParameters(value);
+            Bson newValue = replaceQueryParameters(value, entity);
             if (value != newValue) {
                 values.set(i, newValue);
             }
@@ -281,17 +307,17 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
         return values;
     }
 
-    private BsonValue replaceQueryParametersInBsonValue(BsonValue value) {
+    private BsonValue replaceQueryParametersInBsonValue(BsonValue value, E entity) {
         if (value instanceof BsonDocument) {
             BsonDocument bsonDocument = (BsonDocument) value;
             BsonInt32 queryParameterIndex = bsonDocument.getInt32(MongoQueryBuilder.QUERY_PARAMETER_PLACEHOLDER, null);
             if (queryParameterIndex != null) {
                 int index = queryParameterIndex.getValue();
-                return getValue(index, preparedQuery.getQueryBindings().get(index), preparedQuery, persistentEntity, codecRegistry);
+                return getValue(index, preparedQuery.getQueryBindings().get(index), preparedQuery, persistentEntity, codecRegistry, entity);
             }
             for (Map.Entry<String, BsonValue> entry : bsonDocument.entrySet()) {
                 BsonValue bsonValue = entry.getValue();
-                BsonValue newValue = replaceQueryParametersInBsonValue(bsonValue);
+                BsonValue newValue = replaceQueryParametersInBsonValue(bsonValue, entity);
                 if (bsonValue != newValue) {
                     entry.setValue(newValue);
                 }
@@ -301,7 +327,7 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
             BsonArray bsonArray = (BsonArray) value;
             for (int i = 0; i < bsonArray.size(); i++) {
                 BsonValue bsonValue = bsonArray.get(i);
-                BsonValue newValue = replaceQueryParametersInBsonValue(bsonValue);
+                BsonValue newValue = replaceQueryParametersInBsonValue(bsonValue, entity);
                 if (bsonValue != newValue) {
                     if (newValue.isNull()) {
                         bsonArray.remove(i);
@@ -320,11 +346,11 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
         return value;
     }
 
-    private <T> BsonValue getValue(int index,
+    private <QE, QR, T> BsonValue getValue(int index,
                                    QueryParameterBinding queryParameterBinding,
-                                   PreparedQuery<?, ?> preparedQuery,
+                                   PreparedQuery<QE, QR> preparedQuery,
                                    RuntimePersistentEntity<T> persistentEntity,
-                                   CodecRegistry codecRegistry) {
+                                   CodecRegistry codecRegistry, E entity) {
         Class<?> parameterConverter = queryParameterBinding.getParameterConverterClass();
         Object value;
         if (queryParameterBinding.getParameterIndex() != -1) {
@@ -343,6 +369,9 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
             value = runtimeEntityRegistry.autoPopulateRuntimeProperty(persistentProperty, previousValue);
             value = convert(value, persistentProperty);
             parameterConverter = null;
+        } else if (entity != null) {
+            PersistentPropertyPath pp = getRequiredPropertyPath(queryParameterBinding, persistentEntity);
+            value = pp.getPropertyValue(entity);
         } else {
             throw new IllegalStateException("Invalid query [" + "]. Unable to establish parameter value for parameter at position: " + (index + 1));
         }
@@ -360,7 +389,9 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
                 Argument<?> argument = parameterIndex > -1 ? preparedQuery.getArguments()[parameterIndex] : null;
                 value = convert(parameterConverter, value, argument);
             }
-            if (value instanceof String) {
+            // Check if the parameter is not an id which might be represented as String but needs to mapped as ObjectId
+            if (value instanceof String && queryParameterBinding.getPropertyPath() != null) {
+                // TODO: improve id recognition
                 PersistentPropertyPath pp = getRequiredPropertyPath(queryParameterBinding, persistentEntity);
                 RuntimePersistentProperty<?> persistentProperty = (RuntimePersistentProperty) pp.getProperty();
                 if (persistentProperty instanceof RuntimeAssociation) {

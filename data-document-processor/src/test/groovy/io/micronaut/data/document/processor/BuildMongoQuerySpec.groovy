@@ -1,5 +1,6 @@
 package io.micronaut.data.document.processor
 
+import io.micronaut.data.intercept.annotation.DataMethod
 import io.micronaut.data.mongodb.annotation.MongoSort
 
 class BuildMongoQuerySpec extends AbstractDataSpec {
@@ -60,6 +61,53 @@ interface MyInterface2 extends CrudRepository<Book, String> {
             String sort = method.getAnnotation(MongoSort).stringValue().get()
         then:
             sort == "{ title : -1 }"
+    }
+
+    void "test delete method"() {
+        given:
+            def repository = buildRepository('test.MyInterface2', """
+import io.micronaut.data.mongodb.annotation.*;
+import io.micronaut.data.document.tck.entities.Book;
+
+@MongoRepository
+@io.micronaut.context.annotation.Executable
+interface MyInterface2 extends CrudRepository<Book, String> {
+
+    @MongoDeleteQuery(\"{_id:{\$eq:123}}\")
+    void customDelete();
+
+}
+"""
+            )
+
+            def method = repository.getRequiredMethod("customDelete")
+        when:
+            String q = TestUtils.getQuery(method)
+        then:
+            q == '{_id:{$eq:123}}'
+    }
+
+    void "test query method"() {
+        given:
+            def repository = buildRepository('test.MyInterface2', """
+import io.micronaut.data.mongodb.annotation.*;
+import io.micronaut.data.document.tck.entities.Book;
+
+@MongoRepository
+@io.micronaut.context.annotation.Executable
+interface MyInterface2 extends CrudRepository<Book, String> {
+
+    List<org.bson.BsonDocument> queryAll();
+
+}
+"""
+            )
+
+            def method = repository.getRequiredMethod("queryAll")
+        when:
+            String resultType = method.stringValue(DataMethod.NAME, DataMethod.META_MEMBER_RESULT_TYPE).get()
+        then:
+            resultType == 'org.bson.BsonDocument'
     }
 
 }

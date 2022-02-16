@@ -21,8 +21,11 @@ import io.micronaut.core.annotation.Internal;
 public interface MongoAnnotations {
 
     String REPOSITORY = "io.micronaut.data.mongodb.annotation.MongoRepository";
+    String FILTER = "io.micronaut.data.mongodb.annotation.MongoFilter";
     String FIND_QUERY = "io.micronaut.data.mongodb.annotation.MongoFindQuery";
     String SORT = "io.micronaut.data.mongodb.annotation.MongoSort";
     String PROJECTION = "io.micronaut.data.mongodb.annotation.MongoProjection";
+    String DELETE_QUERY = "io.micronaut.data.mongodb.annotation.MongoDeleteQuery";
+    String UPDATE_QUERY = "io.micronaut.data.mongodb.annotation.MongoUpdateQuery";
 
 }

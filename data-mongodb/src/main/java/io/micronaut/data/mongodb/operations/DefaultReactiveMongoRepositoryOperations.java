@@ -271,7 +271,7 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
             MongoPreparedQuery<?, Number, MongoDatabase> mongoPreparedQuery = getMongoPreparedQuery(preparedQuery);
             RuntimePersistentEntity<?> persistentEntity = mongoPreparedQuery.getRuntimePersistentEntity();
             MongoDatabase database = mongoPreparedQuery.getDatabase();
-            MongoUpdateMany updateMany = mongoPreparedQuery.getUpdateMany();
+            MongoUpdate updateMany = mongoPreparedQuery.getUpdateMany();
             if (QUERY_LOG.isDebugEnabled()) {
                 QUERY_LOG.debug("Executing Mongo 'updateMany' with filter: {} and update: {}", updateMany.getFilter().toBsonDocument().toJson(), updateMany.getUpdate().toBsonDocument().toJson());
             }

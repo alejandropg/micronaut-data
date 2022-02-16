@@ -48,7 +48,11 @@ public interface MongoStoredQuery<E, R> extends StoredQuery<E, R> {
         return null;
     }
 
-    default MongoUpdateMany getUpdateMany() {
+    default MongoUpdate getUpdateMany() {
+        return null;
+    }
+
+    default MongoUpdate getUpdateOne(E entity) {
         return null;
     }
 

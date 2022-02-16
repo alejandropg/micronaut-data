@@ -21,13 +21,13 @@ import io.micronaut.core.annotation.NonNull;
 import org.bson.conversions.Bson;
 
 /**
- * The MongoDB's update many command.
+ * The MongoDB's many command.
  *
  * @author Denis Stepanov
  * @since 3.3.0
  */
 @Experimental
-public final class MongoUpdateMany {
+public final class MongoUpdate {
 
     private final Bson update;
     private final Bson filter;
@@ -40,7 +40,7 @@ public final class MongoUpdateMany {
      * @param filter  The filter
      * @param options The options
      */
-    public MongoUpdateMany(@NonNull Bson update, @NonNull Bson filter, @NonNull UpdateOptions options) {
+    public MongoUpdate(@NonNull Bson update, @NonNull Bson filter, @NonNull UpdateOptions options) {
         this.update = update;
         this.filter = filter;
         this.options = options;
