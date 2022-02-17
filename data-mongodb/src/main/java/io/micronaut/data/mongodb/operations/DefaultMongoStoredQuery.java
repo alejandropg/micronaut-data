@@ -313,11 +313,6 @@ final class DefaultMongoStoredQuery<E, R, Dtb> implements DelegateStoredQuery<E,
         if (pipeline == null) {
             return null;
         }
-//        Pageable pageable = getPageable();
-//        if (pageable != Pageable.UNPAGED) {
-//            pipeline = new ArrayList<>(pipeline);
-//            applyPageable(pageable, pipeline);
-//        }
         return pipelineNeedsProcessing ? replaceQueryParametersInList(pipeline, invocationContext, null) : pipeline;
     }
 

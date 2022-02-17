@@ -18,6 +18,7 @@ package io.micronaut.data.mongodb.operations;
 import com.mongodb.client.model.Collation;
 import com.mongodb.client.model.DeleteOneModel;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.ReplaceOneModel;
 import com.mongodb.client.model.UpdateOneModel;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.reactivestreams.client.AggregatePublisher;
@@ -560,7 +561,7 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
     }
 
     private <T> Flux<T> updateBatch(MongoOperationContext ctx, Iterable<T> values, RuntimePersistentEntity<T> persistentEntity) {
-        MongoReactiveEntitiesOperation<T> op = createMongoReplaceManyOperation(ctx, persistentEntity, values);
+        MongoReactiveEntitiesOperation<T> op = createMongoReplaceOneInBulkOperation(ctx, persistentEntity, values);
         op.update();
         return op.getEntities();
     }
@@ -718,7 +719,7 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
         };
     }
 
-    private <T> MongoReactiveEntitiesOperation<T> createMongoReplaceManyOperation(MongoOperationContext ctx, RuntimePersistentEntity<T> persistentEntity, Iterable<T> entities) {
+    private <T> MongoReactiveEntitiesOperation<T> createMongoReplaceOneInBulkOperation(MongoOperationContext ctx, RuntimePersistentEntity<T> persistentEntity, Iterable<T> entities) {
         return new MongoReactiveEntitiesOperation<T>(ctx, persistentEntity, entities, false) {
 
             final MongoDatabase mongoDatabase = getDatabase(persistentEntity, ctx.repositoryType);
@@ -738,29 +739,25 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
             @Override
             protected void execute() throws RuntimeException {
                 Mono<Tuple2<List<Data>, Long>> entitiesWithRowsUpdated = entities.collectList().flatMap(data -> {
-                    Mono<Long> modifiedCount = Mono.just(0L);
-                    int expectedToBeUpdated = 0;
+                    List<ReplaceOneModel<BsonDocument>> replaces = new ArrayList<>(data.size());
                     for (Data d : data) {
                         if (d.vetoed) {
                             continue;
                         }
-                        expectedToBeUpdated++;
                         Bson filter = (Bson) d.filter;
                         if (QUERY_LOG.isDebugEnabled()) {
                             QUERY_LOG.debug("Executing Mongo 'replaceOne' with filter: {}", filter.toBsonDocument().toJson());
                         }
                         BsonDocument bsonDocument = BsonDocumentWrapper.asBsonDocument(d.entity, mongoDatabase.getCodecRegistry());
                         bsonDocument.remove("_id");
-                        modifiedCount = modifiedCount.flatMap(count -> Mono.from(collection.replaceOne(ctx.clientSession, filter, bsonDocument)).map(updateResult -> count + updateResult.getModifiedCount()));
+                        replaces.add(new ReplaceOneModel<>(filter, bsonDocument));
                     }
-                    int finalExpectedToBeUpdated = expectedToBeUpdated;
-                    modifiedCount = modifiedCount.map(count -> {
+                    return Mono.from(collection.bulkWrite(ctx.clientSession, replaces)).map(bulkWriteResult -> {
                         if (persistentEntity.getVersion() != null) {
-                            checkOptimisticLocking(finalExpectedToBeUpdated, count);
+                            checkOptimisticLocking(replaces.size(), bulkWriteResult.getModifiedCount());
                         }
-                        return count;
+                        return Tuples.of(data, (long) bulkWriteResult.getModifiedCount());
                     });
-                    return modifiedCount.map(count -> Tuples.of(data, count));
                 }).cache();
                 entities = entitiesWithRowsUpdated.flatMapMany(t -> Flux.fromIterable(t.getT1()));
                 rowsUpdated = entitiesWithRowsUpdated.map(Tuple2::getT2);
@@ -783,7 +780,7 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
                             continue;
                         }
                         MongoUpdate updateOne = storedQuery.getUpdateOne(d.entity);
-                        updates.add(new UpdateOneModel<T>(updateOne.getFilter(), updateOne.getUpdate(), updateOne.getOptions()));
+                        updates.add(new UpdateOneModel<>(updateOne.getFilter(), updateOne.getUpdate(), updateOne.getOptions()));
                     }
                     Mono<Long> modifiedCount = Mono.from(getCollection(storedQuery).bulkWrite(ctx.clientSession, updates)).map(result -> {
                         if (storedQuery.isOptimisticLock()) {

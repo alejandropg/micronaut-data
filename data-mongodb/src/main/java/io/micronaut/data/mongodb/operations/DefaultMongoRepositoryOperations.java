@@ -27,6 +27,7 @@ import com.mongodb.client.MongoIterable;
 import com.mongodb.client.model.Collation;
 import com.mongodb.client.model.DeleteOneModel;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.ReplaceOneModel;
 import com.mongodb.client.model.UpdateOneModel;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.InsertManyResult;
@@ -459,7 +460,7 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
                 op.update();
                 return op.getEntities();
             }
-            MongoEntitiesOperation<T> op = createMongoReplaceManyOperation(ctx, runtimeEntityRegistry.getEntity(operation.getRootEntity()), operation);
+            MongoEntitiesOperation<T> op = createMongoReplaceOneInBulkOperation(ctx, runtimeEntityRegistry.getEntity(operation.getRootEntity()), operation);
             op.update();
             return op.getEntities();
         });
@@ -756,7 +757,7 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
         };
     }
 
-    private <T> MongoEntitiesOperation<T> createMongoReplaceManyOperation(MongoOperationContext ctx, RuntimePersistentEntity<T> persistentEntity, Iterable<T> entities) {
+    private <T> MongoEntitiesOperation<T> createMongoReplaceOneInBulkOperation(MongoOperationContext ctx, RuntimePersistentEntity<T> persistentEntity, Iterable<T> entities) {
         return new MongoEntitiesOperation<T>(ctx, persistentEntity, entities, false) {
 
             final MongoDatabase mongoDatabase = getDatabase(persistentEntity, ctx.repositoryType);
@@ -771,23 +772,23 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
 
             @Override
             protected void execute() throws RuntimeException {
-                int expectedToBeUpdated = 0;
+                List<ReplaceOneModel<BsonDocument>> replaces = new ArrayList<>(entities.size());
                 for (Data d : entities) {
                     if (d.vetoed) {
                         continue;
                     }
-                    expectedToBeUpdated++;
                     Bson filter = filters.get(d);
                     if (QUERY_LOG.isDebugEnabled()) {
                         QUERY_LOG.debug("Executing Mongo 'replaceOne' with filter: {}", filter.toBsonDocument().toJson());
                     }
                     BsonDocument bsonDocument = BsonDocumentWrapper.asBsonDocument(d.entity, mongoDatabase.getCodecRegistry());
                     bsonDocument.remove("_id");
-                    UpdateResult updateResult = collection.replaceOne(ctx.clientSession, filter, bsonDocument);
-                    modifiedCount += updateResult.getModifiedCount();
+                    replaces.add(new ReplaceOneModel<>(filter, bsonDocument));
                 }
+                BulkWriteResult bulkWriteResult = collection.bulkWrite(ctx.clientSession, replaces);
+                modifiedCount = bulkWriteResult.getModifiedCount();
                 if (persistentEntity.getVersion() != null) {
-                    checkOptimisticLocking(expectedToBeUpdated, (int) modifiedCount);
+                    checkOptimisticLocking(replaces.size(), (int) modifiedCount);
                 }
             }
         };
