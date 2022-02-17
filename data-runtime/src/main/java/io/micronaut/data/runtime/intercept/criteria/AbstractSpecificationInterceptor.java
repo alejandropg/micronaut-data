@@ -184,13 +184,13 @@ public abstract class AbstractSpecificationInterceptor<T, R> extends AbstractQue
 
         StoredQuery<E, QR> storedQuery;
         if (type == Type.COUNT) {
-            storedQuery = (StoredQuery<E, QR>) storedQueryResolver.createCountStoredQuery(context.getName(), context.getAnnotationMetadata(),
+            storedQuery = (StoredQuery<E, QR>) storedQueryResolver.createCountStoredQuery(context.getExecutableMethod(), context.getName(), context.getAnnotationMetadata(),
                     rootEntity, query, queryParts, queryParameters);
         } else if (type == Type.FIND_ALL) {
-            storedQuery = storedQueryResolver.createStoredQuery(context.getName(), context.getAnnotationMetadata(), rootEntity,
+            storedQuery = storedQueryResolver.createStoredQuery(context.getExecutableMethod(), context.getName(), context.getAnnotationMetadata(), rootEntity,
                     query, null, queryParts, queryParameters, !pageable.isUnpaged(), false);
         } else {
-            storedQuery = storedQueryResolver.createStoredQuery(context.getName(), context.getAnnotationMetadata(), rootEntity,
+            storedQuery = storedQueryResolver.createStoredQuery(context.getExecutableMethod(), context.getName(), context.getAnnotationMetadata(), rootEntity,
                     query, update, queryParts, queryParameters, false, true);
         }
         return preparedQueryResolver.resolveQuery(context, storedQuery, pageable);

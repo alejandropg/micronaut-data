@@ -40,7 +40,6 @@ import io.micronaut.core.annotation.Internal;
 import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.beans.BeanProperty;
-import io.micronaut.data.annotation.TypeRole;
 import io.micronaut.data.exceptions.DataAccessException;
 import io.micronaut.data.model.DataType;
 import io.micronaut.data.model.Page;
@@ -58,6 +57,7 @@ import io.micronaut.data.model.runtime.RuntimeAssociation;
 import io.micronaut.data.model.runtime.RuntimeEntityRegistry;
 import io.micronaut.data.model.runtime.RuntimePersistentEntity;
 import io.micronaut.data.model.runtime.RuntimePersistentProperty;
+import io.micronaut.data.model.runtime.StoredQuery;
 import io.micronaut.data.model.runtime.UpdateBatchOperation;
 import io.micronaut.data.model.runtime.UpdateOperation;
 import io.micronaut.data.mongodb.conf.RequiresSyncMongo;
@@ -87,7 +87,6 @@ import org.bson.conversions.Bson;
 
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -188,18 +187,10 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
         Class<R> resultType = preparedQuery.getResultType();
         RuntimePersistentEntity<T> persistentEntity = preparedQuery.getRuntimePersistentEntity();
         MongoDatabase database = preparedQuery.getDatabase();
-        List<Bson> pipeline = preparedQuery.getPipeline();
-        if (pipeline == null) {
-            Bson filter = preparedQuery.getFilterOrEmpty();
+        if (preparedQuery.isAggregate()) {
+            MongoAggregation aggregation = preparedQuery.getAggregation();
             if (QUERY_LOG.isDebugEnabled()) {
-                QUERY_LOG.debug("Executing Mongo 'countDocuments' with filter: {}", filter.toBsonDocument().toJson());
-            }
-            long count = getCollection(database, persistentEntity, BsonDocument.class)
-                    .countDocuments(clientSession, filter);
-            return conversionService.convertRequired(count, resultType);
-        } else {
-            if (QUERY_LOG.isDebugEnabled()) {
-                QUERY_LOG.debug("Executing Mongo 'aggregate' with pipeline: {}", pipeline.stream().map(e -> e.toBsonDocument().toJson()).collect(Collectors.toList()));
+                QUERY_LOG.debug("Executing Mongo 'aggregate' with pipeline: {}", aggregation.getPipeline().stream().map(e -> e.toBsonDocument().toJson()).collect(Collectors.toList()));
             }
             R result = aggregate(clientSession, preparedQuery, BsonDocument.class)
                     .map(bsonDocument -> convertResult(database.getCodecRegistry(), resultType, bsonDocument, false))
@@ -208,6 +199,16 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
                 result = conversionService.convertRequired(0, resultType);
             }
             return result;
+        } else {
+            MongoFind find = preparedQuery.getFind();
+            Bson filter = find.getOptions().getFilter();
+            filter = filter == null ? new BsonDocument() : filter;
+            if (QUERY_LOG.isDebugEnabled()) {
+                QUERY_LOG.debug("Executing Mongo 'countDocuments' with filter: {}", filter.toBsonDocument().toJson());
+            }
+            long count = getCollection(database, persistentEntity, BsonDocument.class)
+                    .countDocuments(clientSession, filter);
+            return conversionService.convertRequired(count, resultType);
         }
     }
 
@@ -435,6 +436,14 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
     public <T> T update(UpdateOperation<T> operation) {
         return withClientSession(clientSession -> {
             MongoOperationContext ctx = new MongoOperationContext(clientSession, operation.getAnnotationMetadata(), operation.getRepositoryType());
+            StoredQuery<T, ?> storedQuery = operation.getStoredQuery();
+            if (storedQuery != null) {
+                MongoStoredQuery<T, ?, MongoDatabase> mongoStoredQuery = getMongoStoredQuery(storedQuery);
+                MongoEntitiesOperation<T> op = createMongoUpdateOneInBulkOperation(ctx, mongoStoredQuery.getRuntimePersistentEntity(),
+                        Collections.singletonList(operation.getEntity()), mongoStoredQuery);
+                op.update();
+                return op.getEntities().iterator().next();
+            }
             return updateOne(ctx, operation.getEntity(), runtimeEntityRegistry.getEntity(operation.getRootEntity()));
         });
     }
@@ -443,15 +452,31 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
     public <T> Iterable<T> updateAll(UpdateBatchOperation<T> operation) {
         return withClientSession(clientSession -> {
             MongoOperationContext ctx = new MongoOperationContext(clientSession, operation.getAnnotationMetadata(), operation.getRepositoryType());
-            return updateBatch(ctx, operation, runtimeEntityRegistry.getEntity(operation.getRootEntity()));
+            StoredQuery<T, ?> storedQuery = operation.getStoredQuery();
+            if (storedQuery != null) {
+                MongoStoredQuery<T, ?, MongoDatabase> mongoStoredQuery = getMongoStoredQuery(storedQuery);
+                MongoEntitiesOperation<T> op = createMongoUpdateOneInBulkOperation(ctx, mongoStoredQuery.getRuntimePersistentEntity(), operation, mongoStoredQuery);
+                op.update();
+                return op.getEntities();
+            }
+            MongoEntitiesOperation<T> op = createMongoReplaceManyOperation(ctx, runtimeEntityRegistry.getEntity(operation.getRootEntity()), operation);
+            op.update();
+            return op.getEntities();
         });
     }
 
     @Override
     public <T> int delete(DeleteOperation<T> operation) {
         return withClientSession(clientSession -> {
-            RuntimePersistentEntity<T> persistentEntity = runtimeEntityRegistry.getEntity(operation.getRootEntity());
             MongoOperationContext ctx = new MongoOperationContext(clientSession, operation.getAnnotationMetadata(), operation.getRepositoryType());
+            StoredQuery<T, ?> storedQuery = operation.getStoredQuery();
+            if (storedQuery != null) {
+                MongoStoredQuery<T, ?, MongoDatabase> mongoStoredQuery = getMongoStoredQuery(storedQuery);
+                MongoEntitiesOperation<T> op = createMongoDeleteOneInBulkOperation(ctx, mongoStoredQuery.getRuntimePersistentEntity(), Collections.singletonList(operation.getEntity()), mongoStoredQuery);
+                op.delete();
+                return (int) op.modifiedCount;
+            }
+            RuntimePersistentEntity<T> persistentEntity = runtimeEntityRegistry.getEntity(operation.getRootEntity());
             MongoEntityOperation<T> op = createMongoDeleteOneOperation(ctx, persistentEntity, operation.getEntity());
             op.delete();
             return (int) op.modifiedCount;
@@ -461,13 +486,20 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
     @Override
     public <T> Optional<Number> deleteAll(DeleteBatchOperation<T> operation) {
         return withClientSession(clientSession -> {
+            MongoOperationContext ctx = new MongoOperationContext(clientSession, operation.getAnnotationMetadata(), operation.getRepositoryType());
+            StoredQuery<T, ?> storedQuery = operation.getStoredQuery();
+            if (storedQuery != null) {
+                MongoStoredQuery<T, ?, MongoDatabase> mongoStoredQuery = getMongoStoredQuery(storedQuery);
+                MongoEntitiesOperation<T> op = createMongoDeleteOneInBulkOperation(ctx, mongoStoredQuery.getRuntimePersistentEntity(), operation, mongoStoredQuery);
+                op.delete();
+                return Optional.of(op.modifiedCount);
+            }
             RuntimePersistentEntity<T> persistentEntity = runtimeEntityRegistry.getEntity(operation.getRootEntity());
             if (operation.all()) {
                 MongoDatabase mongoDatabase = getDatabase(persistentEntity, operation.getRepositoryType());
                 long deletedCount = getCollection(mongoDatabase, persistentEntity, persistentEntity.getIntrospection().getBeanType()).deleteMany(EMPTY).getDeletedCount();
                 return Optional.of(deletedCount);
             }
-            MongoOperationContext ctx = new MongoOperationContext(clientSession, operation.getAnnotationMetadata(), operation.getRepositoryType());
             MongoEntitiesOperation<T> op = createMongoDeleteManyOperation(ctx, persistentEntity, operation);
             op.delete();
             return Optional.of(op.modifiedCount);
@@ -478,122 +510,42 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
     public Optional<Number> executeUpdate(PreparedQuery<?, Number> preparedQuery) {
         return withClientSession(clientSession -> {
             MongoPreparedQuery<?, Number, MongoDatabase> mongoPreparedQuery = getMongoPreparedQuery(preparedQuery);
-            Optional<Iterable> entities = preparedQuery.getParameterInRole(TypeRole.ENTITIES, Iterable.class);
-            if (entities.isPresent()) {
-                return updateOneInBulk(clientSession, mongoPreparedQuery, entities.get());
-            } else {
-                Optional<Object> entity = preparedQuery.getParameterInRole(TypeRole.ENTITY, (Class<Object>) preparedQuery.getRootEntity());
-                if (entity.isPresent()) {
-                    return updateOne(clientSession, (MongoPreparedQuery) mongoPreparedQuery, entity.get());
-                }
-            }
-            return updateMany(clientSession, mongoPreparedQuery);
-        });
-    }
-
-    private <QE> Optional<Number> updateOneInBulk(ClientSession clientSession, MongoPreparedQuery<QE, Number, MongoDatabase> preparedQuery, Iterable<QE> entities) {
-        List<UpdateOneModel<QE>> updates = entities instanceof Collection ? new ArrayList<>(((Collection<QE>) entities).size()) : new ArrayList<>();
-        for (QE entity : entities) {
-            MongoUpdate updateOne = preparedQuery.getUpdateOne(entity);
+            MongoUpdate updateMany = mongoPreparedQuery.getUpdateMany();
             if (QUERY_LOG.isDebugEnabled()) {
-                QUERY_LOG.debug("Executing Mongo 'updateOne' with filter: {} and update: {}", updateOne.getFilter().toBsonDocument().toJson(), updateOne.getUpdate().toBsonDocument().toJson());
+                QUERY_LOG.debug("Executing Mongo 'updateMany' with filter: {} and update: {}", updateMany.getFilter().toBsonDocument().toJson(), updateMany.getUpdate().toBsonDocument().toJson());
             }
-            updates.add(new UpdateOneModel<>(updateOne.getFilter(), updateOne.getUpdate(), updateOne.getOptions()));
-        }
-        BulkWriteResult bulkWriteResult = getCollection(preparedQuery).bulkWrite(clientSession, updates);
-        if (preparedQuery.isOptimisticLock()) {
-            checkOptimisticLocking(updates.size(), bulkWriteResult.getModifiedCount());
-        }
-        return Optional.of(bulkWriteResult.getModifiedCount());
-    }
-
-    private <QE> Optional<Number> updateOne(ClientSession clientSession, MongoPreparedQuery<QE, Number, MongoDatabase> preparedQuery, QE entity) {
-        MongoUpdate updateOne = preparedQuery.getUpdateOne(entity);
-        if (QUERY_LOG.isDebugEnabled()) {
-            QUERY_LOG.debug("Executing Mongo 'updateOne' with filter: {} and update: {}", updateOne.getFilter().toBsonDocument().toJson(), updateOne.getUpdate().toBsonDocument().toJson());
-        }
-        UpdateResult updateResult = getCollection(preparedQuery)
-                .updateOne(clientSession, updateOne.getFilter(), updateOne.getUpdate(), updateOne.getOptions());
-        if (preparedQuery.isOptimisticLock()) {
-            checkOptimisticLocking(1, (int) updateResult.getModifiedCount());
-        }
-        return Optional.of(updateResult.getModifiedCount());
-    }
-
-    private Optional<Number> updateMany(ClientSession clientSession, MongoPreparedQuery<?, Number, MongoDatabase> preparedQuery) {
-        MongoUpdate updateMany = preparedQuery.getUpdateMany();
-        if (QUERY_LOG.isDebugEnabled()) {
-            QUERY_LOG.debug("Executing Mongo 'updateMany' with filter: {} and update: {}", updateMany.getFilter().toBsonDocument().toJson(), updateMany.getUpdate().toBsonDocument().toJson());
-        }
-        UpdateResult updateResult = getCollection(preparedQuery)
-                .updateMany(clientSession, updateMany.getFilter(), updateMany.getUpdate(), updateMany.getOptions());
-        if (preparedQuery.isOptimisticLock()) {
-            checkOptimisticLocking(1, (int) updateResult.getModifiedCount());
-        }
-        return Optional.of(updateResult.getModifiedCount());
+            UpdateResult updateResult = getCollection(mongoPreparedQuery)
+                    .updateMany(clientSession, updateMany.getFilter(), updateMany.getUpdate(), updateMany.getOptions());
+            if (preparedQuery.isOptimisticLock()) {
+                checkOptimisticLocking(1, (int) updateResult.getModifiedCount());
+            }
+            return Optional.of(updateResult.getModifiedCount());
+        });
     }
 
     @Override
     public Optional<Number> executeDelete(PreparedQuery<?, Number> preparedQuery) {
         return withClientSession(clientSession -> {
             MongoPreparedQuery<?, Number, MongoDatabase> mongoPreparedQuery = getMongoPreparedQuery(preparedQuery);
-            Optional<Iterable> entities = preparedQuery.getParameterInRole(TypeRole.ENTITIES, Iterable.class);
-            if (entities.isPresent()) {
-                return deleteOneInBulk(clientSession, mongoPreparedQuery, entities.get());
-            } else {
-                Optional<Object> entity = preparedQuery.getParameterInRole(TypeRole.ENTITY, (Class<Object>) preparedQuery.getRootEntity());
-                if (entity.isPresent()) {
-                    return deleteOne(clientSession, (MongoPreparedQuery) mongoPreparedQuery, entity.get());
-                }
-            }
-            return deleteMany(getMongoPreparedQuery(preparedQuery), clientSession);
-        });
-    }
-
-    private <QE> Optional<Number> deleteOneInBulk(ClientSession clientSession, MongoPreparedQuery<QE, Number, MongoDatabase> preparedQuery, Iterable<QE> entities) {
-        List<DeleteOneModel<QE>> deletes = entities instanceof Collection ? new ArrayList<>(((Collection<QE>) entities).size()) : new ArrayList<>();
-        for (QE entity : entities) {
-            MongoDelete deleteOne = preparedQuery.getDeleteOne(entity);
+            MongoDelete deleteMany = mongoPreparedQuery.getDeleteMany();
             if (QUERY_LOG.isDebugEnabled()) {
-                QUERY_LOG.debug("Executing Mongo 'deleteOne' with filter: {}", deleteOne.getFilter().toBsonDocument().toJson());
+                QUERY_LOG.debug("Executing Mongo 'deleteMany' with filter: {}", deleteMany.getFilter().toBsonDocument().toJson());
             }
-            deletes.add(new DeleteOneModel<>(deleteOne.getFilter(), deleteOne.getOptions()));
-        }
-        BulkWriteResult bulkWriteResult = getCollection(preparedQuery).bulkWrite(clientSession, deletes);
-        if (preparedQuery.isOptimisticLock()) {
-            checkOptimisticLocking(deletes.size(), bulkWriteResult.getModifiedCount());
-        }
-        return Optional.of(bulkWriteResult.getDeletedCount());
-    }
-
-    private <QE> Optional<Number> deleteOne(ClientSession clientSession, MongoPreparedQuery<QE, Number, MongoDatabase> preparedQuery, QE entity) {
-        MongoDelete deleteOne = preparedQuery.getDeleteOne(entity);
-        if (QUERY_LOG.isDebugEnabled()) {
-            QUERY_LOG.debug("Executing Mongo 'deleteOne' with filter: {}", deleteOne.getFilter().toBsonDocument().toJson());
-        }
-        DeleteResult deleteResult = getCollection(preparedQuery).
-                deleteOne(clientSession, deleteOne.getFilter(), deleteOne.getOptions());
-        if (preparedQuery.isOptimisticLock()) {
-            checkOptimisticLocking(1, (int) deleteResult.getDeletedCount());
-        }
-        return Optional.of(deleteResult.getDeletedCount());
-    }
-
-    private Optional<Number> deleteMany(MongoPreparedQuery<?, Number, MongoDatabase> preparedQuery, ClientSession clientSession) {
-        MongoDelete deleteMany = preparedQuery.getDeleteMany();
-        if (QUERY_LOG.isDebugEnabled()) {
-            QUERY_LOG.debug("Executing Mongo 'deleteMany' with filter: {}", deleteMany.getFilter().toBsonDocument().toJson());
-        }
-        DeleteResult deleteResult = getCollection(preparedQuery).
-                deleteMany(clientSession, deleteMany.getFilter(), deleteMany.getOptions());
-        if (preparedQuery.isOptimisticLock()) {
-            checkOptimisticLocking(1, (int) deleteResult.getDeletedCount());
-        }
-        return Optional.of(deleteResult.getDeletedCount());
+            DeleteResult deleteResult = getCollection(mongoPreparedQuery).
+                    deleteMany(clientSession, deleteMany.getFilter(), deleteMany.getOptions());
+            if (preparedQuery.isOptimisticLock()) {
+                checkOptimisticLocking(1, (int) deleteResult.getDeletedCount());
+            }
+            return Optional.of(deleteResult.getDeletedCount());
+        });
     }
 
     private <E> MongoCollection<E> getCollection(MongoPreparedQuery<E, ?, MongoDatabase> preparedQuery) {
         return getCollection(preparedQuery.getDatabase(), preparedQuery.getRuntimePersistentEntity(), preparedQuery.getRootEntity());
+    }
+
+    private <E> MongoCollection<E> getCollection(MongoStoredQuery<E, ?, MongoDatabase> storedQuery) {
+        return getCollection(storedQuery.getDatabase(), storedQuery.getRuntimePersistentEntity(), storedQuery.getRootEntity());
     }
 
     private <K> K triggerPostLoad(AnnotationMetadata annotationMetadata, RuntimePersistentEntity<K> persistentEntity, K entity) {
@@ -677,12 +629,6 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
         MongoEntityOperation<T> op = createMongoReplaceOneOperation(ctx, persistentEntity, value);
         op.update();
         return op.getEntity();
-    }
-
-    private <T> List<T> updateBatch(MongoOperationContext ctx, Iterable<T> values, RuntimePersistentEntity<T> persistentEntity) {
-        MongoEntitiesOperation<T> op = createMongoReplaceManyOperation(ctx, persistentEntity, values);
-        op.update();
-        return op.getEntities();
     }
 
     @Override
@@ -778,6 +724,38 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
         };
     }
 
+    private <T> MongoEntitiesOperation<T> createMongoUpdateOneInBulkOperation(MongoOperationContext ctx,
+                                                                              RuntimePersistentEntity<T> persistentEntity,
+                                                                              Iterable<T> entities,
+                                                                              MongoStoredQuery<T, ?, MongoDatabase> storedQuery) {
+        return new MongoEntitiesOperation<T>(ctx, persistentEntity, entities, false) {
+
+            @Override
+            protected void collectAutoPopulatedPreviousValues() {
+            }
+
+            @Override
+            protected void execute() throws RuntimeException {
+                List<UpdateOneModel<T>> updates = new ArrayList<>(entities.size());
+                for (Data d : entities) {
+                    if (d.vetoed) {
+                        continue;
+                    }
+                    MongoUpdate updateOne = storedQuery.getUpdateOne(d.entity);
+                    if (QUERY_LOG.isDebugEnabled()) {
+                        QUERY_LOG.debug("Executing Mongo 'updateOne' with filter: {} and update: {}", updateOne.getFilter().toBsonDocument().toJson(), updateOne.getUpdate().toBsonDocument().toJson());
+                    }
+                    updates.add(new UpdateOneModel<>(updateOne.getFilter(), updateOne.getUpdate(), updateOne.getOptions()));
+                }
+                BulkWriteResult bulkWriteResult = getCollection(storedQuery).bulkWrite(ctx.clientSession, updates);
+                modifiedCount += bulkWriteResult.getModifiedCount();
+                if (persistentEntity.getVersion() != null) {
+                    checkOptimisticLocking(updates.size(), (int) modifiedCount);
+                }
+            }
+        };
+    }
+
     private <T> MongoEntitiesOperation<T> createMongoReplaceManyOperation(MongoOperationContext ctx, RuntimePersistentEntity<T> persistentEntity, Iterable<T> entities) {
         return new MongoEntitiesOperation<T>(ctx, persistentEntity, entities, false) {
 
@@ -867,6 +845,34 @@ public final class DefaultMongoRepositoryOperations extends AbstractMongoReposit
                 if (persistentEntity.getVersion() != null) {
                     int expected = (int) entities.stream().filter(d -> !d.vetoed).count();
                     checkOptimisticLocking(expected, (int) modifiedCount);
+                }
+            }
+        };
+    }
+
+    private <T> MongoEntitiesOperation<T> createMongoDeleteOneInBulkOperation(MongoOperationContext ctx,
+                                                                              RuntimePersistentEntity<T> persistentEntity,
+                                                                              Iterable<T> entities,
+                                                                              MongoStoredQuery<T, ?, MongoDatabase> storedQuery) {
+        return new MongoEntitiesOperation<T>(ctx, persistentEntity, entities, false) {
+
+            @Override
+            protected void execute() throws RuntimeException {
+                List<DeleteOneModel<T>> deletes = new ArrayList<>(entities.size());
+                for (Data d : entities) {
+                    if (d.vetoed) {
+                        continue;
+                    }
+                    MongoDelete deleteOne = storedQuery.getDeleteOne(d.entity);
+                    if (QUERY_LOG.isDebugEnabled()) {
+                        QUERY_LOG.debug("Executing Mongo 'deleteOne' with filter: {} ", deleteOne.getFilter().toBsonDocument().toJson());
+                    }
+                    deletes.add(new DeleteOneModel<>(deleteOne.getFilter(), deleteOne.getOptions()));
+                }
+                BulkWriteResult bulkWriteResult = getCollection(storedQuery).bulkWrite(ctx.clientSession, deletes);
+                modifiedCount = bulkWriteResult.getDeletedCount();
+                if (persistentEntity.getVersion() != null) {
+                    checkOptimisticLocking(deletes.size(), (int) modifiedCount);
                 }
             }
         };

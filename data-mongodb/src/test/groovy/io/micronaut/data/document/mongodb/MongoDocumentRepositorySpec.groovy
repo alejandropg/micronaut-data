@@ -75,6 +75,21 @@ class MongoDocumentRepositorySpec extends AbstractDocumentRepositorySpec impleme
             people.count { it.name == "Denis"} == 2
     }
 
+    void "test custom update single"() {
+        given:
+            savePersons(["Dennis", "Jeff", "James", "Dennis"])
+
+        when:
+            def people = personRepository.findAll().toList()
+            def jeff = people.find {it.name == "Jeff"}
+            def updated = personRepository.updateCustomSingle(jeff)
+            people = personRepository.findAll().toList()
+
+        then:
+            updated == 1
+            people.count {it.name == "tom"} == 1
+    }
+
     void "test custom update only names"() {
         when:
             savePersons(["Dennis", "Jeff", "James", "Dennis"])

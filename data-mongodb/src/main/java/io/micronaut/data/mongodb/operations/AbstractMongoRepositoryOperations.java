@@ -46,8 +46,10 @@ import io.micronaut.data.runtime.query.DefaultPreparedQueryResolver;
 import io.micronaut.data.runtime.query.DefaultStoredQueryResolver;
 import io.micronaut.data.runtime.query.PreparedQueryResolver;
 import io.micronaut.data.runtime.query.StoredQueryResolver;
+import io.micronaut.data.runtime.query.internal.DefaultStoredQuery;
 import io.micronaut.http.codec.MediaTypeCodec;
 import io.micronaut.inject.BeanDefinition;
+import io.micronaut.inject.ExecutableMethod;
 import io.micronaut.inject.qualifiers.Qualifiers;
 import org.bson.BsonDocument;
 import org.bson.BsonNull;
@@ -131,6 +133,13 @@ abstract class AbstractMongoRepositoryOperations<Dtb, Cnt, PS> extends AbstractR
 
     protected abstract CodecRegistry getCodecRegistry(Dtb database);
 
+    protected <E, R> MongoStoredQuery<E, R, Dtb> getMongoStoredQuery(StoredQuery<E, R> storedQuery) {
+        if (storedQuery instanceof MongoStoredQuery) {
+            return (MongoStoredQuery<E, R, Dtb>) storedQuery;
+        }
+        throw new IllegalStateException("Expected for stored query to be of type: MongoStoredQuery");
+    }
+
     protected <E, R> MongoPreparedQuery<E, R, Dtb> getMongoPreparedQuery(PreparedQuery<E, R> preparedQuery) {
         if (preparedQuery instanceof MongoPreparedQuery) {
             return (MongoPreparedQuery<E, R, Dtb>) preparedQuery;
@@ -142,18 +151,8 @@ abstract class AbstractMongoRepositoryOperations<Dtb, Cnt, PS> extends AbstractR
     public <E, R> PreparedQuery<E, R> resolveQuery(MethodInvocationContext<?, ?> context,
                                                    StoredQuery<E, R> storedQuery,
                                                    Pageable pageable) {
-        RuntimePersistentEntity<E> persistentEntity = runtimeEntityRegistry.getEntity(storedQuery.getRootEntity());
         PreparedQuery<E, R> preparedQuery = defaultPreparedQueryResolver.resolveQuery(context, storedQuery, pageable);
-        Dtb database = getDatabase(persistentEntity, preparedQuery.getRepositoryType());
-        CodecRegistry codecRegistry = getCodecRegistry(database);
-        return new DefaultMongoPreparedQuery<>(
-                preparedQuery,
-                codecRegistry,
-                attributeConverterRegistry,
-                runtimeEntityRegistry,
-                persistentEntity,
-                conversionService,
-                database);
+        return new DefaultMongoPreparedQuery<>(preparedQuery);
     }
 
     @Override
@@ -161,32 +160,36 @@ abstract class AbstractMongoRepositoryOperations<Dtb, Cnt, PS> extends AbstractR
                                                         StoredQuery<E, R> storedQuery,
                                                         Pageable pageable) {
 
-        RuntimePersistentEntity<E> persistentEntity = runtimeEntityRegistry.getEntity(storedQuery.getRootEntity());
         PreparedQuery<E, R> preparedQuery = defaultPreparedQueryResolver.resolveCountQuery(context, storedQuery, pageable);
-        Dtb database = getDatabase(persistentEntity, preparedQuery.getRepositoryType());
-        CodecRegistry codecRegistry = getCodecRegistry(database);
-        return new DefaultMongoPreparedQuery<>(
-                preparedQuery,
-                codecRegistry,
-                attributeConverterRegistry,
-                runtimeEntityRegistry,
-                persistentEntity,
-                conversionService,
-                database);
+        return new DefaultMongoPreparedQuery<>(preparedQuery);
     }
 
     @Override
     public <E, R> StoredQuery<E, R> resolveQuery(MethodInvocationContext<?, ?> context, Class<E> entityClass, Class<R> resultType) {
-        return new DefaultMongoStoredQuery<>(defaultStoredQueryResolver.resolveQuery(context, entityClass, resultType));
+        StoredQuery<E, R> storedQuery = defaultStoredQueryResolver.resolveQuery(context, entityClass, resultType);
+        RuntimePersistentEntity<E> persistentEntity = runtimeEntityRegistry.getEntity(storedQuery.getRootEntity());
+        Class<?> repositoryType = ((DefaultStoredQuery) storedQuery).getMethod().getDeclaringType();
+        Dtb database = getDatabase(persistentEntity, repositoryType);
+        CodecRegistry codecRegistry = getCodecRegistry(database);
+        return new DefaultMongoStoredQuery<>(storedQuery, codecRegistry, attributeConverterRegistry,
+                runtimeEntityRegistry, conversionService, persistentEntity, database);
     }
 
     @Override
     public <E, R> StoredQuery<E, R> resolveCountQuery(MethodInvocationContext<?, ?> context, Class<E> entityClass, Class<R> resultType) {
-        return new DefaultMongoStoredQuery<>(defaultStoredQueryResolver.resolveCountQuery(context, entityClass, resultType));
+        StoredQuery<E, R> storedQuery = defaultStoredQueryResolver.resolveCountQuery(context, entityClass, resultType);
+        Class<?> repositoryType = ((DefaultStoredQuery) storedQuery).getMethod().getDeclaringType();
+        RuntimePersistentEntity<E> persistentEntity = runtimeEntityRegistry.getEntity(storedQuery.getRootEntity());
+        Dtb database = getDatabase(persistentEntity, repositoryType);
+        CodecRegistry codecRegistry = getCodecRegistry(database);
+        return new DefaultMongoStoredQuery<>(storedQuery, codecRegistry, attributeConverterRegistry,
+                runtimeEntityRegistry, conversionService, persistentEntity, database);
     }
 
     @Override
-    public <E, QR> StoredQuery<E, QR> createStoredQuery(String name, AnnotationMetadata annotationMetadata,
+    public <E, QR> StoredQuery<E, QR> createStoredQuery(ExecutableMethod<?, ?> executableMethod,
+                                                        String name,
+                                                        AnnotationMetadata annotationMetadata,
                                                         Class<Object> rootEntity,
                                                         String query,
                                                         String update,
@@ -194,21 +197,30 @@ abstract class AbstractMongoRepositoryOperations<Dtb, Cnt, PS> extends AbstractR
                                                         List<QueryParameterBinding> queryParameters,
                                                         boolean hasPageable,
                                                         boolean isSingleResult) {
-        StoredQuery<E, QR> storedQuery = defaultStoredQueryResolver.createStoredQuery(name, annotationMetadata,
+        StoredQuery<E, QR> storedQuery = defaultStoredQueryResolver.createStoredQuery(executableMethod, name, annotationMetadata,
                 rootEntity, query, update, queryParts, queryParameters, hasPageable, isSingleResult);
-        return new DefaultMongoStoredQuery<>(storedQuery, update);
+        Class<?> repositoryType = executableMethod.getDeclaringType();
+        RuntimePersistentEntity<E> persistentEntity = runtimeEntityRegistry.getEntity(storedQuery.getRootEntity());
+        Dtb database = getDatabase(persistentEntity, repositoryType);
+        CodecRegistry codecRegistry = getCodecRegistry(database);
+        return new DefaultMongoStoredQuery<>(storedQuery, codecRegistry, attributeConverterRegistry, runtimeEntityRegistry, conversionService, persistentEntity, database, update);
     }
 
     @Override
-    public StoredQuery<Object, Long> createCountStoredQuery(String name,
+    public StoredQuery<Object, Long> createCountStoredQuery(ExecutableMethod<?, ?> executableMethod,
+                                                            String name,
                                                             AnnotationMetadata annotationMetadata,
                                                             Class<Object> rootEntity,
                                                             String query,
                                                             String[] queryParts,
                                                             List<QueryParameterBinding> queryParameters) {
-        StoredQuery<Object, Long> storedQuery = defaultStoredQueryResolver.createCountStoredQuery(name, annotationMetadata,
+        StoredQuery<Object, Long> storedQuery = defaultStoredQueryResolver.createCountStoredQuery(executableMethod, name, annotationMetadata,
                 rootEntity, query, queryParts, queryParameters);
-        return new DefaultMongoStoredQuery<>(storedQuery);
+        Class<?> repositoryType = executableMethod.getDeclaringType();
+        RuntimePersistentEntity<Object> persistentEntity = runtimeEntityRegistry.getEntity(storedQuery.getRootEntity());
+        Dtb database = getDatabase(persistentEntity, repositoryType);
+        CodecRegistry codecRegistry = getCodecRegistry(database);
+        return new DefaultMongoStoredQuery<>(storedQuery, codecRegistry, attributeConverterRegistry, runtimeEntityRegistry, conversionService, persistentEntity, database);
     }
 
     protected <R> R convertResult(CodecRegistry codecRegistry,

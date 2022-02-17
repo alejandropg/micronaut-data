@@ -106,8 +106,8 @@ public class MongoRawQueryMethodMatcher implements MethodMatcher {
                 }
 
                 Map.Entry<ClassElement, Class<? extends DataInterceptor>> entry = FindersUtils.resolveInterceptorTypeByOperationType(
-                        false,
-                        false,
+                        entityParameter != null,
+                        entitiesParameter != null,
                         operationType,
                         matchContext);
 

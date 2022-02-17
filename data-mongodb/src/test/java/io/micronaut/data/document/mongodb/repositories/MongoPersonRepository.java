@@ -20,6 +20,9 @@ public interface MongoPersonRepository extends PersonRepository {
     @MongoUpdateQuery(update = "{$set:{name: :name}}", filter = "{_id:{$eq: :id}}")
     long updateCustomOnlyNames(List<Person> people);
 
+    @MongoUpdateQuery(update = "{$set:{name: \"tom\"}}", filter = "{name:{$eq: :name}}")
+    int updateCustomSingle(Person person);
+
     @MongoDeleteQuery("{name:{$eq: :name}}")
     int deleteCustom(List<Person> people);
 

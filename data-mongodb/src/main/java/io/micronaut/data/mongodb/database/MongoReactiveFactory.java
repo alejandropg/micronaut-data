@@ -44,6 +44,7 @@ import io.micronaut.data.operations.reactive.ReactorReactiveRepositoryOperations
 import io.micronaut.data.runtime.operations.ExecutorAsyncOperations;
 import io.micronaut.data.runtime.query.PreparedQueryResolver;
 import io.micronaut.data.runtime.query.StoredQueryResolver;
+import io.micronaut.inject.ExecutableMethod;
 import jakarta.inject.Singleton;
 
 import java.util.List;
@@ -161,18 +162,20 @@ final class MongoReactiveFactory {
         }
 
         @Override
-        public <E, QR> StoredQuery<E, QR> createStoredQuery(String name, AnnotationMetadata annotationMetadata,
+        public <E, QR> StoredQuery<E, QR> createStoredQuery(ExecutableMethod<?, ?> executableMethod,
+                                                            String name, AnnotationMetadata annotationMetadata,
                                                             Class<Object> rootEntity, String query, String update,
                                                             String[] queryParts, List<QueryParameterBinding> queryParameters,
                                                             boolean hasPageable, boolean isSingleResult) {
-            return reactiveOperations.createStoredQuery(name, annotationMetadata, rootEntity, query, update, queryParts, queryParameters, hasPageable, isSingleResult);
+            return reactiveOperations.createStoredQuery(executableMethod, name, annotationMetadata, rootEntity, query, update, queryParts, queryParameters, hasPageable, isSingleResult);
         }
 
         @Override
-        public StoredQuery<Object, Long> createCountStoredQuery(String name, AnnotationMetadata annotationMetadata,
+        public StoredQuery<Object, Long> createCountStoredQuery(ExecutableMethod<?, ?> executableMethod,
+                                                                String name, AnnotationMetadata annotationMetadata,
                                                                 Class<Object> rootEntity, String query, String[] queryParts,
                                                                 List<QueryParameterBinding> queryParameters) {
-            return reactiveOperations.createCountStoredQuery(name, annotationMetadata, rootEntity, query, queryParts, queryParameters);
+            return reactiveOperations.createCountStoredQuery(executableMethod, name, annotationMetadata, rootEntity, query, queryParts, queryParameters);
         }
     }
 

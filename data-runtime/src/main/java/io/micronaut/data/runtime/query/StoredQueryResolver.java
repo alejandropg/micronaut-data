@@ -19,6 +19,7 @@ import io.micronaut.aop.MethodInvocationContext;
 import io.micronaut.core.annotation.AnnotationMetadata;
 import io.micronaut.data.model.runtime.QueryParameterBinding;
 import io.micronaut.data.model.runtime.StoredQuery;
+import io.micronaut.inject.ExecutableMethod;
 
 import java.util.List;
 
@@ -58,6 +59,7 @@ public interface StoredQueryResolver {
      * Create stored query from provided values.
      * Used for criteria stored query creation.
      *
+     * @param executableMethod   The executableMethod
      * @param name               The name
      * @param annotationMetadata The annotation metadata
      * @param rootEntity         The root entity
@@ -71,7 +73,8 @@ public interface StoredQueryResolver {
      * @param <QR>               The result type
      * @return new instance of stored query
      */
-    <E, QR> StoredQuery<E, QR> createStoredQuery(String name,
+    <E, QR> StoredQuery<E, QR> createStoredQuery(ExecutableMethod<?, ?> executableMethod,
+                                                 String name,
                                                  AnnotationMetadata annotationMetadata,
                                                  Class<Object> rootEntity,
                                                  String query,
@@ -85,6 +88,7 @@ public interface StoredQueryResolver {
      * Create count stored query from provided values.
      * Used for criteria stored query creation.
      *
+     * @param executableMethod   The executableMethod
      * @param name               The name
      * @param annotationMetadata The annotation metadata
      * @param rootEntity         The root entity
@@ -94,7 +98,8 @@ public interface StoredQueryResolver {
      * @return new instance of stored query
      * @return
      */
-    StoredQuery<Object, Long> createCountStoredQuery(String name,
+    StoredQuery<Object, Long> createCountStoredQuery(ExecutableMethod<?, ?> executableMethod,
+                                                     String name,
                                                      AnnotationMetadata annotationMetadata,
                                                      Class<Object> rootEntity,
                                                      String query,

@@ -15,158 +15,72 @@
  */
 package io.micronaut.data.mongodb.operations;
 
-import com.mongodb.client.model.Collation;
+import io.micronaut.aop.InvocationContext;
 import io.micronaut.core.annotation.Experimental;
-import io.micronaut.core.annotation.NonNull;
-import io.micronaut.core.annotation.Nullable;
+import io.micronaut.data.model.runtime.RuntimePersistentEntity;
 import io.micronaut.data.model.runtime.StoredQuery;
-import org.bson.BsonDocument;
-import org.bson.conversions.Bson;
-
-import java.util.List;
 
 /**
  * MongoDB's {@link StoredQuery}.
  *
- * @param <E> The entity type
- * @param <R> The result type
+ * @param <E>   The entity type
+ * @param <R>   The result type
+ * @param <Dtb> The database type
  * @author Denis Stepanov
  * @since 3.3.
  */
 @Experimental
-public interface MongoStoredQuery<E, R> extends StoredQuery<E, R> {
-
-    default boolean isAggregate() {
-        return false;
-    }
-
-    default MongoAggregation getAggregation() {
-        return null;
-    }
-
-    default MongoFind getFind() {
-        return null;
-    }
-
-    default MongoUpdate getUpdateMany() {
-        return null;
-    }
-
-    default MongoUpdate getUpdateOne(E entity) {
-        return null;
-    }
-
-    default MongoDelete getDeleteMany() {
-        return null;
-    }
-
-    default MongoDelete getDeleteOne(E entity) {
-        return null;
-    }
+public interface MongoStoredQuery<E, R, Dtb> extends StoredQuery<E, R> {
 
     /**
-     * The filter.
-     * NOTE: The value shouldn't be modified.
-     *
-     * @return The filter
+     * @return The persistent entity
      */
-    @Nullable
-    Bson getFilter();
+    RuntimePersistentEntity<E> getRuntimePersistentEntity();
 
     /**
-     * @return true if filter value needs to replace query parameter values.
+     * @return The associated databae
      */
-    boolean isFilterNeedsProcessing();
+    Dtb getDatabase();
 
     /**
-     * The sort.
-     * NOTE: The value shouldn't be modified.
-     *
-     * @return The sort
+     * @return Is aggregation query?
      */
-    @Nullable
-    Bson getSort();
+    boolean isAggregate();
 
     /**
-     * @return true if sort value needs to replace query parameter values.
+     * @param invocationContext The invocation context to have query parameters extracted from
+     * @return The data to execute the aggregation
      */
-    boolean isSortNeedsProcessing();
+    MongoAggregation getAggregation(InvocationContext<?, ?> invocationContext);
 
     /**
-     * The projection.
-     * NOTE: The value shouldn't be modified.
-     *
-     * @return The projection
+     * @param invocationContext The invocation context to have query parameters extracted from
+     * @return The data to execute the find
      */
-    @Nullable
-    Bson getProjection();
+    MongoFind getFind(InvocationContext<?, ?> invocationContext);
 
     /**
-     * @return true if projection value needs to replace query parameter values.
+     * @param invocationContext The invocation context to have query parameters extracted from
+     * @return The data to execute the update
      */
-    boolean isProjectionNeedsProcessing();
+    MongoUpdate getUpdateMany(InvocationContext<?, ?> invocationContext);
 
     /**
-     * The filter or empty.
-     * NOTE: The value shouldn't be modified.
-     *
-     * @return The filter
+     * @param entity The entity to have query parameters extracted from
+     * @return The data to execute the update
      */
-    @NonNull
-    default Bson getFilterOrEmpty() {
-        Bson filter = getFilter();
-        return filter == null ? new BsonDocument() : filter;
-    }
+    MongoUpdate getUpdateOne(E entity);
 
     /**
-     * The aggregation pipeline.
-     * NOTE: The value shouldn't be modified.
-     *
-     * @return The pipeline
+     * @param invocationContext The invocation context to have query parameters extracted from
+     * @return The data to execute the delete
      */
-    @Nullable
-    List<Bson> getPipeline();
+    MongoDelete getDeleteMany(InvocationContext<?, ?> invocationContext);
 
     /**
-     * @return true if pipeline value needs to replace query parameter values.
+     * @param entity The entity to have query parameters extracted from
+     * @return The data to execute the delete
      */
-    boolean isPipelineNeedsProcessing();
-
-    /**
-     * The update.
-     * NOTE: The value shouldn't be modified.
-     *
-     * @return The update
-     */
-    @Nullable
-    Bson getUpdate();
-
-    /**
-     * @return true if update value needs to replace query parameter values.
-     */
-    boolean isUpdateNeedsProcessing();
-
-    /**
-     * The Bson.
-     * NOTE: The value shouldn't be modified.
-     *
-     * @return The Bson
-     */
-    @Nullable
-    default Bson getCollationAsBson() {
-        return null;
-    }
-
-    /**
-     * @return true if collation value needs to replace query parameter values.
-     */
-    default boolean isCollationNeedsProcessing() {
-        return false;
-    }
-
-    @Nullable
-    default Collation getCollation() {
-        return null;
-    }
+    MongoDelete getDeleteOne(E entity);
 
 }
