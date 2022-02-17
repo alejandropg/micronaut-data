@@ -31,6 +31,7 @@ import io.micronaut.core.util.CollectionUtils;
 import io.micronaut.core.util.StringUtils;
 import io.micronaut.data.annotation.Query;
 import io.micronaut.data.document.model.query.builder.MongoQueryBuilder;
+import io.micronaut.data.intercept.annotation.DataMethod;
 import io.micronaut.data.model.DataType;
 import io.micronaut.data.model.PersistentPropertyPath;
 import io.micronaut.data.model.runtime.AttributeConverterRegistry;
@@ -82,20 +83,13 @@ final class DefaultMongoStoredQuery<E, R, Dtb> implements DelegateStoredQuery<E,
     private final ConversionService<?> conversionService;
     private final Dtb database;
     private final RuntimePersistentEntity<E> persistentEntity;
-    private final Bson update;
-    private final boolean updateNeedsProcessing;
-    private final List<Bson> pipeline;
-    private final boolean pipelineNeedsProcessing;
-    private final Bson filter;
-    private final boolean filterNeedsProcessing;
-    private final Bson collationAsBson;
-    private final boolean collationNeedsProcessing;
-    private final Collation collation;
-    private final boolean sortNeedsProcessing;
-    private final Bson sort;
-    private final boolean projectionNeedsProcessing;
-    private final Bson projection;
-    private final boolean isAggregate;
+
+    private final UpdateData updateData;
+    private final FindData findData;
+    private final AggregateData aggregateData;
+    private final DeleteData deleteData;
+
+    private static final BsonDocument EMPTY = new BsonDocument();
 
     DefaultMongoStoredQuery(StoredQuery<E, R> storedQuery,
                             CodecRegistry codecRegistry,
@@ -111,6 +105,7 @@ final class DefaultMongoStoredQuery<E, R, Dtb> implements DelegateStoredQuery<E,
                 conversionService,
                 persistentEntity,
                 database,
+                storedQuery.getAnnotationMetadata().enumValue(DataMethod.NAME, DataMethod.META_MEMBER_OPERATION_TYPE, DataMethod.OperationType.class).get(),
                 storedQuery.getAnnotationMetadata().stringValue(Query.class, "update").orElse(null));
     }
 
@@ -121,37 +116,48 @@ final class DefaultMongoStoredQuery<E, R, Dtb> implements DelegateStoredQuery<E,
                             ConversionService<?> conversionService,
                             RuntimePersistentEntity<E> persistentEntity,
                             Dtb database,
+                            DataMethod.OperationType operationType,
                             String updateJson) {
         this.storedQuery = storedQuery;
         this.codecRegistry = codecRegistry;
         this.attributeConverterRegistry = attributeConverterRegistry;
         this.runtimeEntityRegistry = runtimeEntityRegistry;
         this.conversionService = conversionService;
-        this.update = updateJson == null ? null : BsonDocument.parse(updateJson);
         this.database = database;
         this.persistentEntity = persistentEntity;
-        updateNeedsProcessing = update != null && needsProcessing(update);
-        String query = storedQuery.getQuery();
-        if (StringUtils.isEmpty(query)) {
-            pipeline = null;
-            filter = null;
-        } else if (query.startsWith("[")) {
-            pipeline = BsonArray.parse(query).stream().map(BsonValue::asDocument).collect(Collectors.toList());
-            filter = null;
+        if (operationType == DataMethod.OperationType.QUERY || operationType == DataMethod.OperationType.EXISTS || operationType == DataMethod.OperationType.COUNT) {
+            String query = storedQuery.getQuery();
+            if (StringUtils.isEmpty(query)) {
+                aggregateData = null;
+                findData = new FindData(null);
+            } else if (query.startsWith("[")) {
+                aggregateData = new AggregateData(BsonArray.parse(query).stream().map(BsonValue::asDocument).collect(Collectors.toList()));
+                findData = null;
+            } else {
+                aggregateData = null;
+                findData = new FindData(BsonDocument.parse(query));
+            }
         } else {
-            pipeline = null;
-            filter = BsonDocument.parse(query);
+            aggregateData = null;
+            findData = null;
         }
-        filterNeedsProcessing = filter != null && needsProcessing(filter);
-        pipelineNeedsProcessing = pipeline != null && needsProcessing(pipeline);
-        collationAsBson = storedQuery.getAnnotationMetadata().stringValue(MongoCollation.class).map(BsonDocument::parse).orElse(null);
-        collationNeedsProcessing = collationAsBson != null && needsProcessing(collationAsBson);
-        collation = collationAsBson == null || collationNeedsProcessing ? null : MongoUtils.bsonDocumentAsCollation(collationAsBson.toBsonDocument());
-        sort = storedQuery.getAnnotationMetadata().stringValue(MongoSort.class).map(BsonDocument::parse).orElse(null);
-        sortNeedsProcessing = sort != null && needsProcessing(sort);
-        projection = storedQuery.getAnnotationMetadata().stringValue(MongoProjection.class).map(BsonDocument::parse).orElse(null);
-        projectionNeedsProcessing = projection != null && needsProcessing(projection);
-        isAggregate = pipeline != null;
+
+        if (operationType == DataMethod.OperationType.DELETE) {
+            String query = storedQuery.getQuery();
+            deleteData = new DeleteData(StringUtils.isEmpty(query) ? EMPTY : BsonDocument.parse(query));
+        } else {
+            deleteData = null;
+        }
+
+        if (operationType == DataMethod.OperationType.UPDATE) {
+            if (StringUtils.isEmpty(updateJson)) {
+                throw new IllegalStateException("Update query is expected!");
+            }
+            String query = storedQuery.getQuery();
+            updateData = new UpdateData(BsonDocument.parse(updateJson), StringUtils.isEmpty(query) ? EMPTY : BsonDocument.parse(query));
+        } else {
+            updateData = null;
+        }
     }
 
     @Override
@@ -166,62 +172,62 @@ final class DefaultMongoStoredQuery<E, R, Dtb> implements DelegateStoredQuery<E,
 
     @Override
     public boolean isAggregate() {
-        return isAggregate;
+        return aggregateData != null;
     }
 
     @Override
     public MongoAggregation getAggregation(InvocationContext<?, ?> invocationContext) {
-        List<Bson> pipeline = getPipeline(invocationContext);
-        if (pipeline == null) {
-            throw new IllegalStateException("Pipeline query is not provided!");
+        if (aggregateData == null) {
+            throw new IllegalStateException("Expected aggregation query!");
         }
-        MongoAggregationOptions options = new MongoAggregationOptions().collation(getCollation(invocationContext, null));
-        return new MongoAggregation(pipeline, options);
+        return aggregateData.getAggregation(invocationContext);
     }
 
     @Override
     public MongoFind getFind(InvocationContext<?, ?> invocationContext) {
-        MongoFindOptions options = new MongoFindOptions()
-                .filter(getFilter(invocationContext, null))
-                .collation(getCollation(invocationContext, null))
-                .sort(getSort(invocationContext, null))
-                .projection(getProjection(invocationContext, null));
-        return new MongoFind(options);
+        if (findData == null) {
+            throw new IllegalStateException("Expected find query!");
+        }
+        return findData.getFind(invocationContext);
     }
 
     @Override
     public MongoUpdate getUpdateMany(InvocationContext<?, ?> invocationContext) {
-        Bson update = getUpdate(invocationContext, null);
-        if (update == null) {
-            throw new IllegalStateException("Update query is not provided!");
+        if (updateData == null) {
+            throw new IllegalStateException("Expected update query!");
         }
-        UpdateOptions options = new UpdateOptions().collation(getCollation(invocationContext, null));
-        return new MongoUpdate(update, getFilterOrEmpty(invocationContext, null), options);
+        return updateData.getUpdateMany(invocationContext);
+
     }
 
     @Override
     public MongoUpdate getUpdateOne(E entity) {
-        Bson update = getUpdate(null, entity);
-        if (update == null) {
-            throw new IllegalStateException("Update query is not provided!");
+        if (updateData == null) {
+            throw new IllegalStateException("Expected update query!");
         }
-        UpdateOptions options = new UpdateOptions().collation(getCollation(null, null));
-        return new MongoUpdate(update, getFilterOrEmpty(null, entity), options);
+        return updateData.getUpdateOne(entity);
     }
 
     @Override
     public MongoDelete getDeleteMany(InvocationContext<?, ?> invocationContext) {
-        DeleteOptions options = new DeleteOptions().collation(getCollation(invocationContext, null));
-        return new MongoDelete(getFilterOrEmpty(invocationContext, null), options);
+        if (deleteData == null) {
+            throw new IllegalStateException("Expected delete query!");
+        }
+        return deleteData.getDeleteMany(invocationContext);
     }
 
     @Override
     public MongoDelete getDeleteOne(E entity) {
-        DeleteOptions options = new DeleteOptions().collation(getCollation(null, null));
-        return new MongoDelete(getFilterOrEmpty(null, entity), options);
+        if (deleteData == null) {
+            throw new IllegalStateException("Expected delete query!");
+        }
+        return deleteData.getDeleteOne(entity);
     }
 
     private boolean needsProcessing(Bson value) {
+        if (value == null) {
+            return false;
+        }
         if (value instanceof BsonDocument) {
             return needsProcessingValue(value.toBsonDocument());
         }
@@ -229,6 +235,9 @@ final class DefaultMongoStoredQuery<E, R, Dtb> implements DelegateStoredQuery<E,
     }
 
     private boolean needsProcessing(List<Bson> values) {
+        if (values == null) {
+            return false;
+        }
         for (Bson value : values) {
             if (needsProcessing(value)) {
                 return true;
@@ -263,57 +272,10 @@ final class DefaultMongoStoredQuery<E, R, Dtb> implements DelegateStoredQuery<E,
     }
 
     private Bson getUpdate(@Nullable InvocationContext<?, ?> invocationContext, @Nullable E entity) {
-        if (update == null) {
+        if (updateData == null) {
             throw new IllegalStateException("Update query is not provided!");
         }
-        return updateNeedsProcessing ? replaceQueryParameters(update, invocationContext, entity) : update;
-    }
-
-    private Bson getFilterOrEmpty(@Nullable InvocationContext<?, ?> invocationContext, E entity) {
-        Bson filter = getFilter(invocationContext, entity);
-        if (filter == null) {
-            return new BsonDocument();
-        }
-        return filter;
-    }
-
-    private Bson getFilter(@Nullable InvocationContext<?, ?> invocationContext, E entity) {
-        if (filter == null) {
-            return null;
-        }
-        return filterNeedsProcessing ? replaceQueryParameters(filter, invocationContext, entity) : filter;
-    }
-
-    private Collation getCollation(@Nullable InvocationContext<?, ?> invocationContext, @Nullable E entity) {
-        if (collation != null) {
-            return collation;
-        }
-        if (collationAsBson == null) {
-            return null;
-        }
-        Bson collationAsBson = collationNeedsProcessing ? replaceQueryParameters(this.collationAsBson, invocationContext, entity) : this.collationAsBson;
-        return MongoUtils.bsonDocumentAsCollation(collationAsBson.toBsonDocument());
-    }
-
-    private Bson getSort(@Nullable InvocationContext<?, ?> invocationContext, @Nullable E entity) {
-        if (sort == null) {
-            return null;
-        }
-        return sortNeedsProcessing ? replaceQueryParameters(sort, invocationContext, entity) : sort;
-    }
-
-    private Bson getProjection(@Nullable InvocationContext<?, ?> invocationContext, @Nullable E entity) {
-        if (projection == null) {
-            return null;
-        }
-        return projectionNeedsProcessing ? replaceQueryParameters(projection, invocationContext, entity) : projection;
-    }
-
-    private List<Bson> getPipeline(@Nullable InvocationContext<?, ?> invocationContext) {
-        if (pipeline == null) {
-            return null;
-        }
-        return pipelineNeedsProcessing ? replaceQueryParametersInList(pipeline, invocationContext, null) : pipeline;
+        return updateData.updateNeedsProcessing ? replaceQueryParameters(updateData.update, invocationContext, entity) : updateData.update;
     }
 
     private Bson replaceQueryParameters(Bson value, @Nullable InvocationContext<?, ?> invocationContext, @Nullable E entity) {
@@ -545,5 +507,157 @@ final class DefaultMongoStoredQuery<E, R, Dtb> implements DelegateStoredQuery<E,
     @Override
     public StoredQuery<E, R> getStoredQueryDelegate() {
         return storedQuery;
+    }
+
+    private final class AggregateData extends CollationSupported {
+        private final List<Bson> pipeline;
+        private final boolean pipelineNeedsProcessing;
+
+        private AggregateData(List<Bson> pipeline) {
+            this.pipeline = pipeline;
+            this.pipelineNeedsProcessing = needsProcessing(pipeline);
+        }
+
+        public MongoAggregation getAggregation(InvocationContext<?, ?> invocationContext) {
+            List<Bson> pipeline = pipelineNeedsProcessing ? replaceQueryParametersInList(this.pipeline, invocationContext, null) : this.pipeline;
+            MongoAggregationOptions options = new MongoAggregationOptions().collation(getCollation(invocationContext, null));
+            return new MongoAggregation(pipeline, options);
+        }
+
+    }
+
+    private final class UpdateData extends CollationSupported {
+        private final Bson update;
+        private final boolean updateNeedsProcessing;
+        private final Bson filter;
+        private final boolean filterNeedsProcessing;
+
+        private UpdateData(Bson update, Bson filter) {
+            this.update = update;
+            this.updateNeedsProcessing = needsProcessing(update);
+            this.filter = filter;
+            this.filterNeedsProcessing = needsProcessing(filter);
+        }
+
+        public MongoUpdate getUpdateMany(InvocationContext<?, ?> invocationContext) {
+            Bson update = getUpdate(invocationContext, null);
+            if (update == null) {
+                throw new IllegalStateException("Update query is not provided!");
+            }
+            UpdateOptions options = new UpdateOptions().collation(getCollation(invocationContext, null));
+            return new MongoUpdate(update, getFilter(invocationContext, null), options);
+        }
+
+        public MongoUpdate getUpdateOne(E entity) {
+            if (updateData == null) {
+                throw new IllegalStateException("Expected update query!");
+            }
+            Bson update = getUpdate(null, entity);
+            if (update == null) {
+                throw new IllegalStateException("Update query is not provided!");
+            }
+            UpdateOptions options = new UpdateOptions().collation(getCollation(null, null));
+            return new MongoUpdate(update, getFilter(null, entity), options);
+        }
+
+        private Bson getFilter(@Nullable InvocationContext<?, ?> invocationContext, E entity) {
+            return filterNeedsProcessing ? replaceQueryParameters(filter, invocationContext, entity) : filter;
+        }
+    }
+
+    private final class FindData extends CollationSupported {
+        private final Bson filter;
+        private final boolean filterNeedsProcessing;
+        private final Bson sort;
+        private final boolean sortNeedsProcessing;
+        private final Bson projection;
+        private final boolean projectionNeedsProcessing;
+
+        private FindData(Bson filter) {
+            sort = storedQuery.getAnnotationMetadata().stringValue(MongoSort.class).map(BsonDocument::parse).orElse(null);
+            sortNeedsProcessing = needsProcessing(sort);
+            projection = storedQuery.getAnnotationMetadata().stringValue(MongoProjection.class).map(BsonDocument::parse).orElse(null);
+            projectionNeedsProcessing = needsProcessing(projection);
+            this.filter = filter;
+            this.filterNeedsProcessing = needsProcessing(filter);
+        }
+
+        public MongoFind getFind(InvocationContext<?, ?> invocationContext) {
+            MongoFindOptions options = new MongoFindOptions()
+                    .filter(getFilter(invocationContext, null))
+                    .collation(getCollation(invocationContext, null))
+                    .sort(getSort(invocationContext, null))
+                    .projection(getProjection(invocationContext, null));
+            return new MongoFind(options);
+        }
+
+        private Bson getFilter(@Nullable InvocationContext<?, ?> invocationContext, E entity) {
+            if (filter == null) {
+                return null;
+            }
+            return filterNeedsProcessing ? replaceQueryParameters(filter, invocationContext, entity) : filter;
+        }
+
+        private Bson getSort(@Nullable InvocationContext<?, ?> invocationContext, @Nullable E entity) {
+            if (sort == null) {
+                return null;
+            }
+            return sortNeedsProcessing ? replaceQueryParameters(sort, invocationContext, entity) : sort;
+        }
+
+        private Bson getProjection(@Nullable InvocationContext<?, ?> invocationContext, @Nullable E entity) {
+            if (projection == null) {
+                return null;
+            }
+            return projectionNeedsProcessing ? replaceQueryParameters(projection, invocationContext, entity) : projection;
+        }
+
+    }
+
+    private final class DeleteData extends CollationSupported {
+        private final Bson filter;
+        private final boolean filterNeedsProcessing;
+
+        private DeleteData(Bson filter) {
+            this.filter = filter;
+            this.filterNeedsProcessing = needsProcessing(filter);
+        }
+
+        public MongoDelete getDeleteMany(InvocationContext<?, ?> invocationContext) {
+            DeleteOptions options = new DeleteOptions().collation(getCollation(invocationContext, null));
+            return new MongoDelete(getFilter(invocationContext, null), options);
+        }
+
+        public MongoDelete getDeleteOne(E entity) {
+            DeleteOptions options = new DeleteOptions().collation(getCollation(null, null));
+            return new MongoDelete(getFilter(null, entity), options);
+        }
+
+        private Bson getFilter(@Nullable InvocationContext<?, ?> invocationContext, E entity) {
+            return filterNeedsProcessing ? replaceQueryParameters(filter, invocationContext, entity) : filter;
+        }
+    }
+
+    private abstract class CollationSupported {
+        private final Bson collationAsBson;
+        private final boolean collationNeedsProcessing;
+        private final Collation collation;
+
+        protected CollationSupported() {
+            collationAsBson = storedQuery.getAnnotationMetadata().stringValue(MongoCollation.class).map(BsonDocument::parse).orElse(null);
+            collationNeedsProcessing = needsProcessing(collationAsBson);
+            collation = collationAsBson == null || collationNeedsProcessing ? null : MongoUtils.bsonDocumentAsCollation(collationAsBson.toBsonDocument());
+        }
+
+        protected Collation getCollation(@Nullable InvocationContext<?, ?> invocationContext, @Nullable E entity) {
+            if (collation != null) {
+                return collation;
+            }
+            if (collationAsBson == null) {
+                return null;
+            }
+            Bson collationAsBson = collationNeedsProcessing ? replaceQueryParameters(this.collationAsBson, invocationContext, entity) : this.collationAsBson;
+            return MongoUtils.bsonDocumentAsCollation(collationAsBson.toBsonDocument());
+        }
     }
 }

@@ -23,6 +23,7 @@ import io.micronaut.data.annotation.Join;
 import io.micronaut.data.annotation.MappedEntity;
 import io.micronaut.data.annotation.TypeRole;
 import io.micronaut.data.intercept.DataInterceptor;
+import io.micronaut.data.intercept.annotation.DataMethod;
 import io.micronaut.data.model.jpa.criteria.impl.AbstractPersistentEntityCriteriaQuery;
 import io.micronaut.data.model.jpa.criteria.PersistentEntityCriteriaBuilder;
 import io.micronaut.data.model.jpa.criteria.PersistentEntityCriteriaQuery;
@@ -250,6 +251,7 @@ public class QueryCriteriaMethodMatch extends AbstractCriteriaMethodMatch {
         }
 
         return new MethodMatchInfo(
+                DataMethod.OperationType.QUERY,
                 resultType,
                 getInterceptorElement(matchContext, interceptorType)
         )
@@ -402,7 +404,7 @@ public class QueryCriteriaMethodMatch extends AbstractCriteriaMethodMatch {
     }
 
     @Override
-    protected MethodMatchInfo.OperationType getOperationType() {
-        return MethodMatchInfo.OperationType.QUERY;
+    protected DataMethod.OperationType getOperationType() {
+        return DataMethod.OperationType.QUERY;
     }
 }

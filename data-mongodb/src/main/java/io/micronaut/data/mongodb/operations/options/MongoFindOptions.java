@@ -49,6 +49,31 @@ public final class MongoFindOptions {
     private Boolean showRecordId;
     private Boolean allowDiskUse;
 
+    public MongoFindOptions() {
+    }
+
+    public MongoFindOptions(MongoFindOptions options) {
+        filter = options.filter;
+        batchSize = options.batchSize;
+        limit = options.limit;
+        projection = options.projection;
+        maxTimeMS = options.maxTimeMS;
+        maxAwaitTimeMS = options.maxAwaitTimeMS;
+        skip = options.skip;
+        sort = options.sort;
+        cursorType = options.cursorType;
+        noCursorTimeout = options.noCursorTimeout;
+        partial = options.partial;
+        collation = options.collation;
+        comment = options.comment;
+        hint = options.hint;
+        max = options.max;
+        min = options.min;
+        returnKey = options.returnKey;
+        showRecordId = options.showRecordId;
+        allowDiskUse = options.allowDiskUse;
+    }
+
     @Nullable
     public Bson getFilter() {
         return filter;

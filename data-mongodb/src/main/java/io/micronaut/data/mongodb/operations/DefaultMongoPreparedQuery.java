@@ -84,7 +84,7 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
         MongoFind find = mongoStoredQuery.getFind(preparedQuery.getContext());
         Pageable pageable = preparedQuery.getPageable();
         if (pageable != Pageable.UNPAGED) {
-            MongoFindOptions options = find.getOptions();
+            MongoFindOptions options = new MongoFindOptions(find.getOptions());
             options.limit(pageable.getSize()).skip((int) pageable.getOffset());
             Sort pageableSort = pageable.getSort();
             if (pageableSort.isSorted()) {
@@ -92,6 +92,7 @@ final class DefaultMongoPreparedQuery<E, R, Dtb> implements DelegatePreparedQuer
                         .collect(Collectors.collectingAndThen(Collectors.toList(), Sorts::orderBy));
                 options.sort(sort);
             }
+            return new MongoFind(options);
         }
         return find;
     }

@@ -23,6 +23,7 @@ import io.micronaut.data.annotation.Query;
 import io.micronaut.data.annotation.TypeRole;
 import io.micronaut.data.document.mongo.MongoAnnotations;
 import io.micronaut.data.intercept.DataInterceptor;
+import io.micronaut.data.intercept.annotation.DataMethod;
 import io.micronaut.data.model.PersistentPropertyPath;
 import io.micronaut.data.model.query.BindingParameter.BindingContext;
 import io.micronaut.data.model.query.builder.QueryParameterBinding;
@@ -75,13 +76,13 @@ public class MongoRawQueryMethodMatcher implements MethodMatcher {
             return null;
         }
         if (matchContext.getMethodElement().hasAnnotation(MongoAnnotations.FIND_QUERY)) {
-            return methodMatchByFilterQuery(MethodMatchInfo.OperationType.QUERY);
+            return methodMatchByFilterQuery(DataMethod.OperationType.QUERY);
         }
         if (matchContext.getMethodElement().hasAnnotation(MongoAnnotations.DELETE_QUERY)) {
-            return methodMatchByFilterQuery(MethodMatchInfo.OperationType.DELETE);
+            return methodMatchByFilterQuery(DataMethod.OperationType.DELETE);
         }
         if (matchContext.getMethodElement().hasAnnotation(MongoAnnotations.UPDATE_QUERY)) {
-            return methodMatchByFilterQuery(MethodMatchInfo.OperationType.UPDATE);
+            return methodMatchByFilterQuery(DataMethod.OperationType.UPDATE);
         }
         if (matchContext.getMethodElement().stringValue(Query.class).isPresent()) {
             throw new MatchFailedException("`@Query` annotations is not supported for MongoDB repositories. Use one of the annotations from `io.micronaut.data.mongodb.annotation` for a custom query.");
@@ -89,7 +90,7 @@ public class MongoRawQueryMethodMatcher implements MethodMatcher {
         return null;
     }
 
-    private MethodMatch methodMatchByFilterQuery(MethodMatchInfo.OperationType operationType) {
+    private MethodMatch methodMatchByFilterQuery(DataMethod.OperationType operationType) {
         return new MethodMatch() {
 
             @Override
@@ -126,6 +127,7 @@ public class MongoRawQueryMethodMatcher implements MethodMatcher {
                 }
 
                 MethodMatchInfo methodMatchInfo = new MethodMatchInfo(
+                        operationType,
                         resultType,
                         FindersUtils.getInterceptorElement(matchContext, interceptorType)
                 );
@@ -148,7 +150,7 @@ public class MongoRawQueryMethodMatcher implements MethodMatcher {
                                MethodMatchInfo methodMatchInfo,
                                ParameterElement entityParameter,
                                ParameterElement entitiesParameter,
-                               MethodMatchInfo.OperationType operationType) {
+                               DataMethod.OperationType operationType) {
         MethodElement methodElement = matchContext.getMethodElement();
         List<ParameterElement> parameters = Arrays.asList(matchContext.getParameters());
         ParameterElement entityParam = null;
@@ -162,12 +164,12 @@ public class MongoRawQueryMethodMatcher implements MethodMatcher {
         }
 
         QueryResult queryResult;
-        if (operationType == MethodMatchInfo.OperationType.UPDATE) {
+        if (operationType == DataMethod.OperationType.UPDATE) {
             queryResult = getUpdateQueryResult(matchContext, parameters, entityParam, persistentEntity);
         } else {
             queryResult = getQueryResult(matchContext, parameters, entityParam, persistentEntity);
         }
-        boolean encodeEntityParameters = persistentEntity != null || operationType == MethodMatchInfo.OperationType.INSERT;
+        boolean encodeEntityParameters = persistentEntity != null || operationType == DataMethod.OperationType.INSERT;
 
         methodElement.annotate(Query.class, builder -> {
             if (queryResult.getUpdate() != null) {

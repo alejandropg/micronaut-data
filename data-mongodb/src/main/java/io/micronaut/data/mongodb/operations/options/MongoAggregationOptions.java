@@ -37,6 +37,19 @@ public final class MongoAggregationOptions {
     private String comment;
     private Bson hint;
 
+    public MongoAggregationOptions() {
+    }
+
+    public MongoAggregationOptions(MongoAggregationOptions options) {
+        allowDiskUse = options.allowDiskUse;
+        maxTimeMS = options.maxTimeMS;
+        maxAwaitTimeMS = options.maxAwaitTimeMS;
+        bypassDocumentValidation = options.bypassDocumentValidation;
+        collation = options.collation;
+        comment = options.comment;
+        hint = options.hint;
+    }
+
     @Nullable
     public Boolean getAllowDiskUse() {
         return allowDiskUse;

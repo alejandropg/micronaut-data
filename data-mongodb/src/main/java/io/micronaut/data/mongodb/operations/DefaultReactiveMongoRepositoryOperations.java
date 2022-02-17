@@ -15,6 +15,7 @@
  */
 package io.micronaut.data.mongodb.operations;
 
+import com.mongodb.CursorType;
 import com.mongodb.client.model.Collation;
 import com.mongodb.client.model.DeleteOneModel;
 import com.mongodb.client.model.Filters;
@@ -94,6 +95,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -461,6 +463,58 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
         if (projection != null) {
             findIterable = findIterable.projection(projection);
         }
+        Integer batchSize = findOptions.getBatchSize();
+        if (batchSize != null) {
+            findIterable = findIterable.batchSize(batchSize);
+        }
+        Boolean allowDiskUse = findOptions.getAllowDiskUse();
+        if (allowDiskUse != null) {
+            findIterable = findIterable.allowDiskUse(allowDiskUse);
+        }
+        Long maxTimeMS = findOptions.getMaxTimeMS();
+        if (maxTimeMS != null) {
+            findIterable = findIterable.maxTime(maxTimeMS, TimeUnit.MILLISECONDS);
+        }
+        Long maxAwaitTimeMS = findOptions.getMaxAwaitTimeMS();
+        if (maxAwaitTimeMS != null) {
+            findIterable = findIterable.maxAwaitTime(maxAwaitTimeMS, TimeUnit.MILLISECONDS);
+        }
+        String comment = findOptions.getComment();
+        if (comment != null) {
+            findIterable = findIterable.comment(comment);
+        }
+        Bson hint = findOptions.getHint();
+        if (hint != null) {
+            findIterable = findIterable.hint(hint);
+        }
+        CursorType cursorType = findOptions.getCursorType();
+        if (cursorType != null) {
+            findIterable = findIterable.cursorType(cursorType);
+        }
+        Boolean noCursorTimeout = findOptions.getNoCursorTimeout();
+        if (noCursorTimeout != null) {
+            findIterable = findIterable.noCursorTimeout(noCursorTimeout);
+        }
+        Boolean partial = findOptions.getPartial();
+        if (partial != null) {
+            findIterable = findIterable.partial(partial);
+        }
+        Bson max = findOptions.getMax();
+        if (max != null) {
+            findIterable = findIterable.max(max);
+        }
+        Bson min = findOptions.getMin();
+        if (min != null) {
+            findIterable = findIterable.min(min);
+        }
+        Boolean returnKey = findOptions.getReturnKey();
+        if (returnKey != null) {
+            findIterable = findIterable.returnKey(returnKey);
+        }
+        Boolean showRecordId = findOptions.getShowRecordId();
+        if (showRecordId != null) {
+            findIterable = findIterable.showRecordId(showRecordId);
+        }
         return findIterable;
     }
 
@@ -484,6 +538,30 @@ public class DefaultReactiveMongoRepositoryOperations extends AbstractMongoRepos
     private <MR> AggregatePublisher<MR> applyAggregateOptions(MongoAggregationOptions aggregateOptions, AggregatePublisher<MR> aggregateIterable) {
         if (aggregateOptions.getCollation() != null) {
             aggregateIterable = aggregateIterable.collation(aggregateOptions.getCollation());
+        }
+        Boolean allowDiskUse = aggregateOptions.getAllowDiskUse();
+        if (allowDiskUse != null) {
+            aggregateIterable = aggregateIterable.allowDiskUse(allowDiskUse);
+        }
+        Long maxTimeMS = aggregateOptions.getMaxTimeMS();
+        if (maxTimeMS != null) {
+            aggregateIterable = aggregateIterable.maxTime(maxTimeMS, TimeUnit.MILLISECONDS);
+        }
+        Long maxAwaitTimeMS = aggregateOptions.getMaxAwaitTimeMS();
+        if (maxTimeMS != null) {
+            aggregateIterable = aggregateIterable.maxAwaitTime(maxAwaitTimeMS, TimeUnit.MILLISECONDS);
+        }
+        Boolean bypassDocumentValidation = aggregateOptions.getBypassDocumentValidation();
+        if (bypassDocumentValidation != null) {
+            aggregateIterable = aggregateIterable.bypassDocumentValidation(bypassDocumentValidation);
+        }
+        String comment = aggregateOptions.getComment();
+        if (comment != null) {
+            aggregateIterable = aggregateIterable.comment(comment);
+        }
+        Bson hint = aggregateOptions.getHint();
+        if (hint != null) {
+            aggregateIterable = aggregateIterable.hint(hint);
         }
         return aggregateIterable;
     }

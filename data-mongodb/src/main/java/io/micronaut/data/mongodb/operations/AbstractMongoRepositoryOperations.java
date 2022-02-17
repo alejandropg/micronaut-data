@@ -25,6 +25,7 @@ import io.micronaut.core.convert.ConversionService;
 import io.micronaut.core.type.Argument;
 import io.micronaut.core.util.StringUtils;
 import io.micronaut.data.annotation.Repository;
+import io.micronaut.data.intercept.annotation.DataMethod;
 import io.micronaut.data.model.Pageable;
 import io.micronaut.data.model.runtime.AttributeConverterRegistry;
 import io.micronaut.data.model.runtime.PreparedQuery;
@@ -188,6 +189,7 @@ abstract class AbstractMongoRepositoryOperations<Dtb, Cnt, PS> extends AbstractR
 
     @Override
     public <E, QR> StoredQuery<E, QR> createStoredQuery(ExecutableMethod<?, ?> executableMethod,
+                                                        DataMethod.OperationType operationType,
                                                         String name,
                                                         AnnotationMetadata annotationMetadata,
                                                         Class<Object> rootEntity,
@@ -197,30 +199,31 @@ abstract class AbstractMongoRepositoryOperations<Dtb, Cnt, PS> extends AbstractR
                                                         List<QueryParameterBinding> queryParameters,
                                                         boolean hasPageable,
                                                         boolean isSingleResult) {
-        StoredQuery<E, QR> storedQuery = defaultStoredQueryResolver.createStoredQuery(executableMethod, name, annotationMetadata,
+        StoredQuery<E, QR> storedQuery = defaultStoredQueryResolver.createStoredQuery(executableMethod, operationType, name, annotationMetadata,
                 rootEntity, query, update, queryParts, queryParameters, hasPageable, isSingleResult);
         Class<?> repositoryType = executableMethod.getDeclaringType();
         RuntimePersistentEntity<E> persistentEntity = runtimeEntityRegistry.getEntity(storedQuery.getRootEntity());
         Dtb database = getDatabase(persistentEntity, repositoryType);
         CodecRegistry codecRegistry = getCodecRegistry(database);
-        return new DefaultMongoStoredQuery<>(storedQuery, codecRegistry, attributeConverterRegistry, runtimeEntityRegistry, conversionService, persistentEntity, database, update);
+        return new DefaultMongoStoredQuery<>(storedQuery, codecRegistry, attributeConverterRegistry, runtimeEntityRegistry, conversionService, persistentEntity, database, operationType, update);
     }
 
     @Override
     public StoredQuery<Object, Long> createCountStoredQuery(ExecutableMethod<?, ?> executableMethod,
+                                                            DataMethod.OperationType operationType,
                                                             String name,
                                                             AnnotationMetadata annotationMetadata,
                                                             Class<Object> rootEntity,
                                                             String query,
                                                             String[] queryParts,
                                                             List<QueryParameterBinding> queryParameters) {
-        StoredQuery<Object, Long> storedQuery = defaultStoredQueryResolver.createCountStoredQuery(executableMethod, name, annotationMetadata,
+        StoredQuery<Object, Long> storedQuery = defaultStoredQueryResolver.createCountStoredQuery(executableMethod, operationType, name, annotationMetadata,
                 rootEntity, query, queryParts, queryParameters);
         Class<?> repositoryType = executableMethod.getDeclaringType();
         RuntimePersistentEntity<Object> persistentEntity = runtimeEntityRegistry.getEntity(storedQuery.getRootEntity());
         Dtb database = getDatabase(persistentEntity, repositoryType);
         CodecRegistry codecRegistry = getCodecRegistry(database);
-        return new DefaultMongoStoredQuery<>(storedQuery, codecRegistry, attributeConverterRegistry, runtimeEntityRegistry, conversionService, persistentEntity, database);
+        return new DefaultMongoStoredQuery<>(storedQuery, codecRegistry, attributeConverterRegistry, runtimeEntityRegistry, conversionService, persistentEntity, database, operationType, null);
     }
 
     protected <R> R convertResult(CodecRegistry codecRegistry,

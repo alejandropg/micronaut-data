@@ -78,6 +78,7 @@ public abstract class DefaultStoredQueryResolver implements StoredQueryResolver 
 
     @Override
     public <E, QR> StoredQuery<E, QR> createStoredQuery(ExecutableMethod<?, ?> executableMethod,
+                                                        DataMethod.OperationType operationType,
                                                         String name,
                                                         AnnotationMetadata annotationMetadata,
                                                         Class<Object> rootEntity,
@@ -158,6 +159,7 @@ public abstract class DefaultStoredQueryResolver implements StoredQueryResolver 
 
     @Override
     public StoredQuery<Object, Long> createCountStoredQuery(ExecutableMethod<?, ?> executableMethod,
+                                                            DataMethod.OperationType operationType,
                                                             String name,
                                                             AnnotationMetadata annotationMetadata,
                                                             Class<Object> rootEntity,
