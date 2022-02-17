@@ -25,13 +25,13 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Defines a custom MongoDB update query.
+ * Defines a custom MongoDB find query options.
  *
  * @author Denis Stepanov
  * @since 3.3.0
  */
 @Retention(RetentionPolicy.RUNTIME)
-@Target(ElementType.METHOD)
+@Target({ElementType.ANNOTATION_TYPE, ElementType.METHOD, ElementType.TYPE})
 @Documented
 @Inherited
 public @interface MongoFindOptions {

@@ -15,9 +15,6 @@
  */
 package io.micronaut.data.mongodb.annotation;
 
-import io.micronaut.context.annotation.AliasFor;
-import io.micronaut.data.annotation.Query;
-
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Inherited;
@@ -26,7 +23,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Defines a custom MongoDB filter query.
+ * Defines a custom MongoDB delete query options.
  *
  * @author Denis Stepanov
  * @since 3.3.0
@@ -35,13 +32,13 @@ import java.lang.annotation.Target;
 @Target({ElementType.ANNOTATION_TYPE, ElementType.METHOD, ElementType.TYPE})
 @Documented
 @Inherited
-public @interface MongoFilter {
+public @interface MongoDeleteOptions {
 
     /**
-     * The custom MongoDB filter query.
+     * The hint.
      *
-     * @return The filter value
+     * @return The hint value
      */
-    @AliasFor(member = "value", annotation = Query.class)
-    String value() default "";
+    String hint() default "";
+
 }
